@@ -1,11 +1,11 @@
 [package]
 version = "0.1.0"
-name = "fibonacci-script"
+name = "minnow-script"
 edition = "2021"
-default-run = "fibonacci"
+default-run = "minnow"
 
 [[bin]]
-name = "fibonacci"
+name = "minnow"
 path = "src/main.rs"
 
 [dependencies]
@@ -15,8 +15,7 @@ serde = { version = "1.0.200", default-features = false, features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "env"] }
 tracing = "0.1.40"
 hex = "0.4.3"
-alloy-sol-types = { workspace = true }
-fibonacci-lib = { path = "../lib" }
+minnow-lib = { path = "../lib" }
 
 [build-dependencies]
 sp1-helper = "3.0.0"

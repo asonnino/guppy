@@ -11,14 +11,14 @@
 //! ```
 
 use clap::Parser;
-use fibonacci_lib::{
+use minnow_lib::{
     commit_single_checkpoint_updates, process_single_checkpoint_updates, CheckpointUpdates, Digest,
     GlobalState,
 };
 use sp1_sdk::{HashableKey, ProverClient, SP1Proof, SP1Stdin};
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
-pub const FIBONACCI_ELF: &[u8] = include_bytes!("../../elf/riscv32im-succinct-zkvm-elf");
+pub const MINNOW_ELF: &[u8] = include_bytes!("../../elf/riscv32im-succinct-zkvm-elf");
 
 /// The arguments for the command.
 #[derive(Parser, Debug)]
@@ -44,7 +44,7 @@ fn main() {
     }
 
     let client = ProverClient::new();
-    let (pk, vk) = client.setup(FIBONACCI_ELF);
+    let (pk, vk) = client.setup(MINNOW_ELF);
 
     let mut global_state = GlobalState::new();
     let state_size = 1;
@@ -112,7 +112,7 @@ fn main() {
 
     if args.execute {
         // Execute the program
-        let (mut output, report) = client.execute(FIBONACCI_ELF, stdin).run().unwrap();
+        let (mut output, report) = client.execute(MINNOW_ELF, stdin).run().unwrap();
         println!("Program executed successfully.");
 
         // Read the output.
