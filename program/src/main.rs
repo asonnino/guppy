@@ -9,8 +9,8 @@
 sp1_zkvm::entrypoint!(main);
 
 use fibonacci_lib::{
-    commit_batch_checkpoint_updates, commit_single_checkpoint_updates, compute_global_commitment,
-    process_batch_checkpoint_updates, BatchCheckpointUpdates, GlobalState,
+    commit_batch_checkpoint_updates, compute_global_commitment, process_batch_checkpoint_updates,
+    BatchCheckpointUpdates, GlobalState,
 };
 
 use sha2::{Digest, Sha256};
