@@ -12,7 +12,8 @@
 
 use clap::Parser;
 use fibonacci_lib::{
-    compute_local_commitment, compute_new_state, CheckpointUpdates, Digest, GlobalState,
+    commit_single_checkpoint_updates, process_single_checkpoint_updates, CheckpointUpdates, Digest,
+    GlobalState,
 };
 use sp1_sdk::{HashableKey, ProverClient, SP1Proof, SP1Stdin};
 
@@ -46,7 +47,7 @@ fn main() {
     let (pk, vk) = client.setup(FIBONACCI_ELF);
 
     let mut global_state = GlobalState::new();
-    let state_size = 100;
+    let state_size = 1;
     // For all supported streams, initialize the global state with a value of 0.
     for i in 0..state_size {
         global_state.push((i, [0u8; 32]));
@@ -67,7 +68,7 @@ fn main() {
         stdin.write(&global_state);
 
         // First checkpoint's updates
-        stdin.write(&first_checkpoint_updates);
+        stdin.write(&vec![first_checkpoint_updates.clone()]);
 
         // The first vk input is no-op => this skips proof verification
         stdin.write(&None::<[u32; 8]>);
@@ -84,19 +85,24 @@ fn main() {
 
     // Setup the first real prover client.
     let mut stdin = SP1Stdin::new();
-    global_state = compute_new_state(&first_checkpoint_updates, &global_state);
+    global_state = process_single_checkpoint_updates(&first_checkpoint_updates, &global_state);
     stdin.write(&global_state);
 
-    let mut second_checkpoint_updates = CheckpointUpdates::new();
-    for i in 0..num_checkpoint_updates {
-        second_checkpoint_updates.push((i + 10, [i as u8; 32]));
+    let num_checkpoints = 100;
+    let mut all_checkpoint_updates = Vec::new();
+    for i in 0..num_checkpoints {
+        let mut next_checkpoint_updates = CheckpointUpdates::new();
+        for j in 0..num_checkpoint_updates {
+            next_checkpoint_updates.push((i * num_checkpoint_updates + j, [i as u8; 32]));
+        }
+        all_checkpoint_updates.push(next_checkpoint_updates);
     }
-    stdin.write(&second_checkpoint_updates);
+    stdin.write(&all_checkpoint_updates);
 
     // From now on, we input the real verification key
     stdin.write(&Some(vk.hash_u32()));
     let second_local_commitment =
-        compute_local_commitment(&first_checkpoint_updates, &first_local_commitment);
+        commit_single_checkpoint_updates(&first_checkpoint_updates, &first_local_commitment);
     stdin.write(&second_local_commitment);
 
     let SP1Proof::Compressed(proof) = starter_proof.proof else {

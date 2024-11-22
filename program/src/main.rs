@@ -9,21 +9,23 @@
 sp1_zkvm::entrypoint!(main);
 
 use fibonacci_lib::{
-    compute_global_commitment, compute_local_commitment, compute_new_state, CheckpointUpdates,
-    GlobalState,
+    commit_batch_checkpoint_updates, commit_single_checkpoint_updates, compute_global_commitment,
+    process_batch_checkpoint_updates, BatchCheckpointUpdates, GlobalState,
 };
 
 use sha2::{Digest, Sha256};
 
 pub fn main() {
     // Read an input to the program.
-    println!("cycle-tracker-start: input-entire-state");
+    println!("cycle-tracker-start: input-state");
     let v_prev = sp1_zkvm::io::read::<GlobalState>();
-    println!("cycle-tracker-end: input-entire-state");
+    println!("cycle-tracker-end: input-state");
+
+    println!("cycle-tracker-start: input-updates");
+    let batch_checkpoint_updates = sp1_zkvm::io::read::<BatchCheckpointUpdates>();
+    println!("cycle-tracker-end: input-updates");
 
     println!("cycle-tracker-start: input-others");
-    let l = sp1_zkvm::io::read::<CheckpointUpdates>();
-
     // Read the verification key
     let vkey = sp1_zkvm::io::read::<Option<[u32; 8]>>();
 
@@ -46,9 +48,10 @@ pub fn main() {
     }
     println!("cycle-tracker-end: recursion");
 
-    let v_next = compute_new_state(&l, &v_prev);
+    let v_next = process_batch_checkpoint_updates(&batch_checkpoint_updates, &v_prev);
     let global_commitment = compute_global_commitment(&v_next);
-    let local_commitment = compute_local_commitment(&l, &last_local_commitment);
+    let local_commitment =
+        commit_batch_checkpoint_updates(&batch_checkpoint_updates, &last_local_commitment);
 
     // Commit to the public values of the program. The final proof will have a commitment to all the
     // bytes that were committed to.
