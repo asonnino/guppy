@@ -2,8 +2,8 @@
 sp1_zkvm::entrypoint!(main);
 
 use minnow_lib::{
-    commit_batch_checkpoint_updates, compute_global_commitment, process_batch_checkpoint_updates,
-    BatchCheckpointUpdates, GlobalState,
+    commit_batch_updates, compute_global_commitment, process_batch_updates, BatchCheckpointUpdates,
+    GlobalState,
 };
 
 use sha2::{Digest, Sha256};
@@ -41,10 +41,9 @@ pub fn main() {
     }
     println!("cycle-tracker-end: recursion");
 
-    let v_next = process_batch_checkpoint_updates(&batch_checkpoint_updates, &v_prev);
+    let v_next = process_batch_updates(&batch_checkpoint_updates, &v_prev);
     let global_commitment = compute_global_commitment(&v_next);
-    let local_commitment =
-        commit_batch_checkpoint_updates(&batch_checkpoint_updates, &last_local_commitment);
+    let local_commitment = commit_batch_updates(&batch_checkpoint_updates, &last_local_commitment);
 
     // Commit to the public values of the program. The final proof will have a commitment to all the
     // bytes that were committed to.
