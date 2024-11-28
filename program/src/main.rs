@@ -6,6 +6,7 @@ use minnow_lib::{
     GlobalState,
 };
 
+use rkyv::{from_bytes, rancor::Error};
 use sha2::{Digest, Sha256};
 
 pub fn main() {
@@ -15,15 +16,17 @@ pub fn main() {
     println!("cycle-tracker-end: input-state");
 
     println!("cycle-tracker-start: input-updates");
-    let batch_checkpoint_updates = sp1_zkvm::io::read::<BatchCheckpointUpdates>();
+    let serialized_batch_checkpoint_updates = sp1_zkvm::io::read_vec();
+    let batch_checkpoint_updates =
+        from_bytes::<BatchCheckpointUpdates, Error>(&serialized_batch_checkpoint_updates).unwrap();
     println!("cycle-tracker-end: input-updates");
 
     println!("cycle-tracker-start: input-others");
-    // Read the verification key
-    let vkey = sp1_zkvm::io::read::<Option<[u32; 8]>>();
-
     // Read the last local commitment
     let last_local_commitment = sp1_zkvm::io::read::<[u8; 32]>();
+
+    // Read the verification key
+    let vkey = sp1_zkvm::io::read::<Option<[u32; 8]>>();
     println!("cycle-tracker-end: input-others");
 
     // println!("Checkpoint updates: {:?}", 1);

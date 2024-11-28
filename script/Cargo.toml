@@ -16,6 +16,7 @@ clap = { version = "4.0", features = ["derive", "env"] }
 tracing = "0.1.40"
 hex = "0.4.3"
 minnow-lib = { path = "../lib" }
+rkyv = "0.8.9"
 
 [build-dependencies]
 sp1-helper = "3.0.0"

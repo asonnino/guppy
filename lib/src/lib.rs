@@ -1,4 +1,6 @@
+use rkyv::{Archive, Deserialize, Serialize};
 use sha3::{Digest as OtherDigest, Sha3_256};
+use std::ops::{Deref, DerefMut};
 
 pub type Digest = [u8; 32];
 pub type StreamID = u32;
@@ -6,7 +8,24 @@ pub type StreamID = u32;
 // The updates from a single checkpoint. The size is m
 pub type CheckpointUpdates = Vec<(StreamID, Digest)>;
 // The updates from multiple checkpoints. The size of the outermost vector is c
-pub type BatchCheckpointUpdates = Vec<CheckpointUpdates>;
+#[derive(Serialize, Deserialize, Archive)]
+pub struct BatchCheckpointUpdates(pub Vec<CheckpointUpdates>);
+
+// Add these implementations
+impl Deref for BatchCheckpointUpdates {
+    type Target = Vec<CheckpointUpdates>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for BatchCheckpointUpdates {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 // The global state of the ZK service. The size is n
 pub type GlobalState = Vec<(StreamID, Digest)>;
 
@@ -14,7 +33,7 @@ pub type GlobalState = Vec<(StreamID, Digest)>;
 #[sp1_derive::cycle_tracker]
 pub fn process_batch_updates(batch: &BatchCheckpointUpdates, v_prev: &GlobalState) -> GlobalState {
     let mut v = v_prev.clone();
-    for checkpoint_updates in batch {
+    for checkpoint_updates in &batch.0 {
         v = process_single_update(checkpoint_updates, &v);
     }
     v
@@ -24,7 +43,7 @@ pub fn process_single_update(
     checkpoint_updates: &CheckpointUpdates,
     v_prev: &GlobalState,
 ) -> GlobalState {
-    let mut v_next = GlobalState::new();
+    let mut v_next = Vec::new();
     for (stream, existing_value) in v_prev {
         if let Some((_, new_value)) = checkpoint_updates.iter().find(|(s, _)| s == stream) {
             v_next.push((*stream, *new_value));
@@ -62,7 +81,7 @@ pub fn compute_global_commitment(v: &GlobalState) -> [u8; 32] {
 #[sp1_derive::cycle_tracker]
 pub fn commit_batch_updates(batch: &BatchCheckpointUpdates, d_prev: &Digest) -> Digest {
     let mut d = *d_prev;
-    for checkpoint_updates in batch {
+    for checkpoint_updates in &batch.0 {
         d = commit_single_update(checkpoint_updates, &d);
     }
     d

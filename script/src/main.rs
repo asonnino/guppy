@@ -1,21 +1,10 @@
-//! An end-to-end example of using the SP1 SDK to generate a proof of a program that can be executed
-//! or have a core proof generated.
-//!
-//! You can run this script using the following command:
-//! ```shell
-//! RUST_LOG=info cargo run --release -- --execute
-//! ```
-//! or
-//! ```shell
-//! RUST_LOG=info cargo run --release -- --prove
-//! ```
-
 use clap::Parser;
 use minnow_lib::{
     commit_batch_updates, process_batch_updates, BatchCheckpointUpdates, CheckpointUpdates, Digest,
     GlobalState,
 };
-use sp1_sdk::{HashableKey, ProverClient, SP1Proof, SP1Stdin};
+use rkyv::{rancor::Error, to_bytes};
+use sp1_sdk::{HashableKey, ProverClient, SP1Proof, SP1Stdin, SP1VerifyingKey};
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const MINNOW_ELF: &[u8] = include_bytes!("../../elf/riscv32im-succinct-zkvm-elf");
@@ -33,7 +22,7 @@ struct Args {
 
 const STATE_SIZE: usize = 1;
 const NUM_CHECKPOINT_UPDATES: usize = 10;
-const NUM_CHECKPOINTS: usize = 10;
+const NUM_CHECKPOINTS: usize = 100;
 
 fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
     let mut all_checkpoint_updates = Vec::new();
@@ -47,7 +36,37 @@ fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
         }
         all_checkpoint_updates.push(next_checkpoint_updates);
     }
-    all_checkpoint_updates
+    BatchCheckpointUpdates(all_checkpoint_updates)
+}
+
+fn write_all_inputs(
+    stdin: &mut SP1Stdin,
+    global_state: &GlobalState,
+    batch_updates: &BatchCheckpointUpdates,
+    vk_and_proof: Option<(SP1VerifyingKey, SP1Proof)>,
+    local_commitment: &[u8; 32],
+) {
+    // 1. Write the service's global state
+    stdin.write(global_state);
+
+    // 2. Write the batch of checkpoint updates
+    let serialized_batch_updates = to_bytes::<Error>(batch_updates).unwrap();
+    stdin.write_slice(&serialized_batch_updates);
+
+    // 3. Write the validator-computed local commitment
+    stdin.write(local_commitment);
+
+    // 4. Write the verification key and proof (if provided)
+    if let Some((vk, proof)) = vk_and_proof {
+        stdin.write(&Some(vk.hash_u32()));
+
+        let SP1Proof::Compressed(proof) = proof else {
+            panic!("proof is not compressed")
+        };
+        stdin.write_proof(*proof, vk.vk);
+    } else {
+        stdin.write(&None::<[u32; 8]>);
+    }
 }
 
 fn main() {
@@ -74,7 +93,7 @@ fn main() {
     for i in 0..NUM_CHECKPOINT_UPDATES {
         first_checkpoint_updates.push((i.try_into().unwrap(), [i as u8; 32]));
     }
-    let first_batch_updates = vec![first_checkpoint_updates];
+    let first_batch_updates = BatchCheckpointUpdates(vec![first_checkpoint_updates]);
 
     let mut local_commitment = [0u8; 32];
 
@@ -83,17 +102,15 @@ fn main() {
         let client = ProverClient::new();
         let mut stdin = SP1Stdin::new();
 
-        // Write the global state
-        stdin.write(&global_state);
-
-        // First checkpoint's updates
-        stdin.write(&first_batch_updates);
-
-        // The first vk input is no-op => this skips proof verification
-        stdin.write(&None::<[u32; 8]>);
-
-        // No previous local commitment (the starter for hash chain)
-        stdin.write(&local_commitment);
+        // Write the global state and the first batch of updates
+        // Set vk to None to skip proof verification
+        write_all_inputs(
+            &mut stdin,
+            &global_state,
+            &first_batch_updates,
+            None,
+            &local_commitment,
+        );
 
         client
             .prove(&pk, stdin)
@@ -101,10 +118,6 @@ fn main() {
             .run()
             .expect("proving failed")
     });
-    let SP1Proof::Compressed(proof) = starter_proof.proof else {
-        panic!()
-    };
-
     // Apply the first batch of updates
     local_commitment = commit_batch_updates(&first_batch_updates, &local_commitment);
     global_state = process_batch_updates(&first_batch_updates, &global_state);
@@ -113,11 +126,13 @@ fn main() {
     let second_batch_updates = generate_sample_batch_updates(2);
 
     let mut stdin = SP1Stdin::new();
-    stdin.write(&global_state);
-    stdin.write(&second_batch_updates);
-    stdin.write(&Some(vk.hash_u32()));
-    stdin.write(&local_commitment);
-    stdin.write_proof(*proof, vk.vk.clone());
+    write_all_inputs(
+        &mut stdin,
+        &global_state,
+        &second_batch_updates,
+        Some((vk.clone(), starter_proof.proof)),
+        &local_commitment,
+    );
 
     if args.execute {
         // Execute the program
