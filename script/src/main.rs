@@ -22,7 +22,7 @@ struct Args {
 
 const STATE_SIZE: usize = 1;
 const NUM_CHECKPOINT_UPDATES: usize = 10;
-const NUM_CHECKPOINTS: usize = 100;
+const NUM_CHECKPOINTS: usize = 10;
 
 fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
     let mut all_checkpoint_updates = Vec::new();

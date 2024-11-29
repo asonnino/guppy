@@ -1,33 +1,18 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use sha3::{Digest as OtherDigest, Sha3_256};
-use std::ops::{Deref, DerefMut};
 
 pub type Digest = [u8; 32];
 pub type StreamID = u32;
+pub type StreamPoint = (StreamID, Digest); // A total of 36 bytes per stream point
 
 // The updates from a single checkpoint. The size is m
-pub type CheckpointUpdates = Vec<(StreamID, Digest)>;
+pub type CheckpointUpdates = Vec<StreamPoint>;
 // The updates from multiple checkpoints. The size of the outermost vector is c
 #[derive(Serialize, Deserialize, Archive)]
 pub struct BatchCheckpointUpdates(pub Vec<CheckpointUpdates>);
 
-// Add these implementations
-impl Deref for BatchCheckpointUpdates {
-    type Target = Vec<CheckpointUpdates>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for BatchCheckpointUpdates {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-// The global state of the ZK service. The size is n
-pub type GlobalState = Vec<(StreamID, Digest)>;
+// The state of the ZK service. The size is n
+pub type GlobalState = Vec<StreamPoint>;
 
 // O(m * n * c) operations
 #[sp1_derive::cycle_tracker]
@@ -54,6 +39,7 @@ pub fn process_single_update(
     v_next
 }
 
+// // Note: Previous implementation with a HashMap used for GlobalState
 // pub fn compute_new_state(l: &CheckpointUpdates, v_prev: &GlobalState) -> GlobalState {
 //     let mut v_next = GlobalState::new();
 //     for (stream, existing_value) in v_prev {
