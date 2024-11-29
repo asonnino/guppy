@@ -2,8 +2,8 @@
 sp1_zkvm::entrypoint!(main);
 
 use minnow_lib::{
-    commit_batch_updates, compute_global_commitment, process_batch_updates, BatchCheckpointUpdates,
-    GlobalState,
+    commit_batch_updates, compute_global_commitment, process_batch_updates_with_hints,
+    BatchCheckpointUpdates, HintsBatch, ZKServiceState,
 };
 
 use rkyv::{from_bytes, rancor::Error};
@@ -12,13 +12,16 @@ use sha2::{Digest, Sha256};
 pub fn main() {
     // Read an input to the program.
     println!("cycle-tracker-start: input-state");
-    let v_prev = sp1_zkvm::io::read::<GlobalState>();
+    let v_prev = sp1_zkvm::io::read::<ZKServiceState>();
     println!("cycle-tracker-end: input-state");
 
     println!("cycle-tracker-start: input-updates");
     let serialized_batch_checkpoint_updates = sp1_zkvm::io::read_vec();
     let batch_checkpoint_updates =
         from_bytes::<BatchCheckpointUpdates, Error>(&serialized_batch_checkpoint_updates).unwrap();
+
+    let serialized_hints = sp1_zkvm::io::read_vec();
+    let hints = from_bytes::<HintsBatch, Error>(&serialized_hints).unwrap();
     println!("cycle-tracker-end: input-updates");
 
     println!("cycle-tracker-start: input-others");
@@ -44,7 +47,7 @@ pub fn main() {
     }
     println!("cycle-tracker-end: recursion");
 
-    let v_next = process_batch_updates(&batch_checkpoint_updates, &v_prev);
+    let v_next = process_batch_updates_with_hints(&batch_checkpoint_updates, &v_prev, &hints);
     let global_commitment = compute_global_commitment(&v_next);
     let local_commitment = commit_batch_updates(&batch_checkpoint_updates, &last_local_commitment);
 

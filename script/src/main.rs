@@ -1,7 +1,8 @@
 use clap::Parser;
 use minnow_lib::{
-    commit_batch_updates, process_batch_updates, BatchCheckpointUpdates, CheckpointUpdates, Digest,
-    GlobalState,
+    check_sorted, commit_batch_updates, generate_hints_batch_and_process_batch_updates,
+    process_batch_updates, BatchCheckpointUpdates, CheckpointUpdates, Digest, HintsBatch,
+    ZKServiceState,
 };
 use rkyv::{rancor::Error, to_bytes};
 use sp1_sdk::{HashableKey, ProverClient, SP1Proof, SP1Stdin, SP1VerifyingKey};
@@ -22,7 +23,7 @@ struct Args {
 
 const STATE_SIZE: usize = 1;
 const NUM_CHECKPOINT_UPDATES: usize = 10;
-const NUM_CHECKPOINTS: usize = 10;
+const NUM_CHECKPOINTS: usize = 100;
 
 fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
     let mut all_checkpoint_updates = Vec::new();
@@ -34,6 +35,7 @@ fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
                 [(i + start_idx) as u8; 32],
             ));
         }
+        assert!(check_sorted(&next_checkpoint_updates));
         all_checkpoint_updates.push(next_checkpoint_updates);
     }
     BatchCheckpointUpdates(all_checkpoint_updates)
@@ -41,8 +43,9 @@ fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
 
 fn write_all_inputs(
     stdin: &mut SP1Stdin,
-    global_state: &GlobalState,
+    global_state: &ZKServiceState,
     batch_updates: &BatchCheckpointUpdates,
+    hints: &HintsBatch,
     vk_and_proof: Option<(SP1VerifyingKey, SP1Proof)>,
     local_commitment: &[u8; 32],
 ) {
@@ -52,6 +55,10 @@ fn write_all_inputs(
     // 2. Write the batch of checkpoint updates
     let serialized_batch_updates = to_bytes::<Error>(batch_updates).unwrap();
     stdin.write_slice(&serialized_batch_updates);
+
+    // 2b. Write the hints
+    let serialized_hints = to_bytes::<Error>(hints).unwrap();
+    stdin.write_slice(&serialized_hints);
 
     // 3. Write the validator-computed local commitment
     stdin.write(local_commitment);
@@ -84,7 +91,7 @@ fn main() {
     let client = ProverClient::new();
     let (pk, vk) = client.setup(MINNOW_ELF);
 
-    let mut global_state = GlobalState::new();
+    let mut global_state = ZKServiceState::new();
     // For all supported streams, initialize the global state with a value of 0.
     for i in 0..STATE_SIZE {
         global_state.push((i.try_into().unwrap(), [0u8; 32]));
@@ -94,6 +101,8 @@ fn main() {
         first_checkpoint_updates.push((i.try_into().unwrap(), [i as u8; 32]));
     }
     let first_batch_updates = BatchCheckpointUpdates(vec![first_checkpoint_updates]);
+    let (hints, new_global_state) =
+        generate_hints_batch_and_process_batch_updates(&first_batch_updates, &global_state);
 
     let mut local_commitment = [0u8; 32];
 
@@ -108,6 +117,7 @@ fn main() {
             &mut stdin,
             &global_state,
             &first_batch_updates,
+            &hints,
             None,
             &local_commitment,
         );
@@ -120,16 +130,19 @@ fn main() {
     });
     // Apply the first batch of updates
     local_commitment = commit_batch_updates(&first_batch_updates, &local_commitment);
-    global_state = process_batch_updates(&first_batch_updates, &global_state);
+    global_state = new_global_state;
 
     // Sample updates simulating changes in the next c checkpoints
     let second_batch_updates = generate_sample_batch_updates(2);
+    let (hints, new_global_state) =
+        generate_hints_batch_and_process_batch_updates(&second_batch_updates, &global_state);
 
     let mut stdin = SP1Stdin::new();
     write_all_inputs(
         &mut stdin,
         &global_state,
         &second_batch_updates,
+        &hints,
         Some((vk.clone(), starter_proof.proof)),
         &local_commitment,
     );
