@@ -15,8 +15,9 @@ serde = { version = "1.0.200", default-features = false, features = ["derive"] }
 clap = { version = "4.0", features = ["derive", "env"] }
 tracing = "0.1.40"
 hex = "0.4.3"
-minnow-lib = { path = "../lib" }
-rkyv = "0.8.9"
+minnow-lib.workspace = true
+rkyv.workspace = true
+anyhow.workspace = true
 
 [build-dependencies]
 sp1-helper = "3.0.0"
