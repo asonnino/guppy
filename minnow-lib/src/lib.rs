@@ -1,7 +1,10 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use sha3::{Digest as OtherDigest, Sha3_256};
 
-pub type Digest = [u8; 32];
+pub mod merkle;
+
+pub const DIGEST_LEN: usize = 32;
+pub type Digest = [u8; DIGEST_LEN];
 pub type StreamID = u32;
 pub type StreamPoint = (StreamID, Digest); // A total of 36 bytes per stream point
 

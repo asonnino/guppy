@@ -12,3 +12,6 @@ alloy-sol-types = "0.7.7"
 rkyv = "0.8.9"
 minnow-lib = { path = "minnow-lib" }
 anyhow = "1.0.93"
+tracing = "0.1.40"
+thiserror = "2.0.3"
+
