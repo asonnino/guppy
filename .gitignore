@@ -1,12 +1,21 @@
 # Cargo build
 **/target
 
+# SP1 elf dir
+elf/
+
 # Cargo config
 .cargo
 
 # Profile-guided optimization
 /tmp
 pgo-data.profdata
+
+# Editors/OS
+**/.history/
+**/.vscode/
+**/.idea/
+.nvimrc
 
 # MacOS nuisances
 .DS_Store
