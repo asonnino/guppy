@@ -33,7 +33,9 @@ jobs:
           ~/.sp1/bin/sp1up 
           ~/.sp1/bin/cargo-prove prove --version
 
-      - name: Build SP1 program
+      - name: Build SP1 programs
         run: |
-          cd program
+          cd minnow-h-program
+          ~/.sp1/bin/cargo-prove prove build
+          cd ../minnow-mt-program
           ~/.sp1/bin/cargo-prove prove build
