@@ -2,17 +2,19 @@
 sp1_zkvm::entrypoint!(main);
 
 use minnow_lib::{
-    commit_batch_updates, compute_global_commitment, process_batch_updates_with_hints,
-    BatchCheckpointUpdates, HintsBatch, ZKServiceState,
+    commit_batch_updates,
+    minnow_h::{HintsBatch, MinnowHServiceState},
+    BatchCheckpointUpdates,
 };
-
 use rkyv::{from_bytes, rancor::Error};
 use sha2::{Digest, Sha256};
 
 pub fn main() {
     // Read an input to the program.
     println!("cycle-tracker-start: input-state");
-    let v_prev = sp1_zkvm::io::read::<ZKServiceState>();
+
+    let serialized_v_prev = sp1_zkvm::io::read_vec();
+    let v_prev = from_bytes::<MinnowHServiceState, Error>(&serialized_v_prev).unwrap();
     println!("cycle-tracker-end: input-state");
 
     println!("cycle-tracker-start: input-updates");
@@ -36,7 +38,7 @@ pub fn main() {
     // println!("Current state: {:?}", 2);
     println!("cycle-tracker-start: recursion");
     if let Some(vkey) = vkey {
-        let last_global_commitment = compute_global_commitment(&v_prev);
+        let last_global_commitment = v_prev.compute_global_commitment();
         let mut public_values = Vec::new();
         public_values.extend_from_slice(&last_global_commitment);
         public_values.extend_from_slice(&last_local_commitment);
@@ -47,8 +49,9 @@ pub fn main() {
     }
     println!("cycle-tracker-end: recursion");
 
-    let v_next = process_batch_updates_with_hints(&batch_checkpoint_updates, &v_prev, &hints);
-    let global_commitment = compute_global_commitment(&v_next);
+    let mut global_state = v_prev;
+    global_state.process_batch_updates_with_hints(&batch_checkpoint_updates, &hints);
+    let global_commitment = global_state.compute_global_commitment();
     let local_commitment = commit_batch_updates(&batch_checkpoint_updates, &last_local_commitment);
 
     // Commit to the public values of the program. The final proof will have a commitment to all the

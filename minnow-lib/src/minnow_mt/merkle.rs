@@ -7,13 +7,27 @@ use core::fmt::Debug;
 use rkyv::{Archive, Deserialize, Serialize};
 use sha3::{Digest as HashFunction, Sha3_256};
 use thiserror::Error;
-use tracing::Level;
 
 use crate::{Digest, DIGEST_LEN};
 
-const LEAF_PREFIX: [u8; 1] = [0];
 const INNER_PREFIX: [u8; 1] = [1];
 const EMPTY_NODE: [u8; DIGEST_LEN] = [0; DIGEST_LEN];
+
+#[macro_export]
+macro_rules! leaf_hash {
+    ( $( $x:expr ),* ) => {
+        {
+            use sha3::Digest as _;
+            const LEAF_PREFIX: [u8; 1] = [0];
+            let mut hasher = sha3::Sha3_256::new();
+            hasher.update(LEAF_PREFIX);
+            $(
+                hasher.update($x);
+            )*
+            hasher.finalize().into()
+        }
+    };
+}
 
 /// Returned if the specified index is out of bounds for a Merkle tree or proof.
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -45,7 +59,16 @@ impl MerkleProof {
         if leaf_index >> self.path.len() != 0 {
             return None;
         }
-        let mut current_hash = leaf_hash(leaf);
+        self.compute_root_from_leaf_hash(leaf_hash(leaf), leaf_index)
+    }
+
+    /// Compute the root hash of the Merkle tree given the leaf hash and index.
+    pub fn compute_root_from_leaf_hash(
+        &self,
+        leaf_hash: Digest,
+        leaf_index: usize,
+    ) -> Option<Digest> {
+        let mut current_hash = leaf_hash;
         let mut level_index = leaf_index;
         for sibling in self.path.iter() {
             // The sibling hash of the current node
@@ -62,9 +85,23 @@ impl MerkleProof {
         Some(current_hash)
     }
 
-    /// Verify that the root hash of the Merkle tree matches the provided root hash.
+    /// Verify that the root hash of the Merkle tree matches the provided root hash given the leaf
+    /// data and index.
     pub fn verify_proof(&self, root: &Digest, leaf: &[u8], leaf_index: usize) -> bool {
         self.compute_root(leaf, leaf_index).as_ref() == Some(root)
+    }
+
+    /// Verify that the root hash of the Merkle tree matches the provided root hash given the leaf
+    /// hash and index.
+    pub fn verify_proof_from_leaf_hash(
+        &self,
+        root: &Digest,
+        leaf_hash: Digest,
+        leaf_index: usize,
+    ) -> bool {
+        self.compute_root_from_leaf_hash(leaf_hash, leaf_index)
+            .as_ref()
+            == Some(root)
     }
 }
 
@@ -77,8 +114,8 @@ impl MerkleProof {
 pub struct MerkleTree {
     // The nodes of the Merkle tree are stored in a vector level by level starting with
     // the leaf hashes.
-    // TODO: Store the nodes separately for each level to enable adding new leaves.
-    nodes: Vec<Digest>,
+    // INV: `nodes` always stores at least the (potentially empty) leaf level.
+    nodes: Vec<Vec<Digest>>,
     n_leaves: usize,
 }
 
@@ -99,34 +136,29 @@ impl MerkleTree {
         I: IntoIterator,
         I::IntoIter: ExactSizeIterator<Item = Digest>,
     {
-        let iter = iter.into_iter();
-        tracing::trace!("building Merkle tree over {} items", iter.len());
+        let leaf_nodes: Vec<Digest> = iter.into_iter().collect();
+        let n_leaves = leaf_nodes.len();
+        tracing::trace!("building Merkle tree over {} items", n_leaves);
 
         // Create the capacity that we know will be needed, since the vec will be
         // reused by the call to from_leaf_nodes.
-        let mut nodes = Vec::with_capacity(n_nodes(iter.len()));
-        nodes.extend(iter);
+        let mut nodes = Vec::with_capacity(n_levels_from_leaves(n_leaves));
+        nodes.push(leaf_nodes);
 
-        let n_leaves = nodes.len();
-        let mut level_nodes = n_leaves;
-        let mut prev_level_index = 0;
+        // Fill all other nodes of the Merkle Tree from the bottom up.
+        while nodes.last().expect("nodes should not be empty").len() > 1 {
+            let prev_level_nodes = nodes.last().expect("nodes should not be empty");
+            let n_level_nodes = prev_level_nodes.len();
+            let n_next_level_nodes = n_level_nodes.div_ceil(2);
+            let mut next_level_nodes = Vec::with_capacity(n_next_level_nodes);
 
-        // Fill all other nodes of the Merkle Tree
-        while level_nodes > 1 {
-            if level_nodes % 2 == 1 {
-                // We need an empty sibling for the last node on the previous level
-                nodes.push(EMPTY_NODE);
-                level_nodes += 1;
-            }
-
-            let new_level_index = prev_level_index + level_nodes;
-
-            (prev_level_index..new_level_index)
-                .step_by(2)
-                .for_each(|index| nodes.push(inner_hash(&nodes[index], &nodes[index + 1])));
-
-            prev_level_index = new_level_index;
-            level_nodes /= 2;
+            (0..n_level_nodes).step_by(2).for_each(|index| {
+                next_level_nodes.push(inner_hash(
+                    &prev_level_nodes[index],
+                    &prev_level_nodes.get(index + 1).unwrap_or(&EMPTY_NODE),
+                ))
+            });
+            nodes.push(next_level_nodes);
         }
 
         Self { nodes, n_leaves }
@@ -138,53 +170,112 @@ impl MerkleTree {
     }
 
     /// Get a copy of the root hash of `self`.
-    pub fn root(&self) -> Digest {
-        self.nodes.last().map_or(EMPTY_NODE, |val| val.clone())
+    pub fn root(&self) -> &Digest {
+        self.nodes
+            .last()
+            .expect("tree should always have at least one level")
+            .last()
+            .unwrap_or(&EMPTY_NODE)
     }
 
     /// Get the [`MerkleProof`] for the leaf at `leaf_index` consisting
     /// of all sibling hashes on the path from the leaf to the root.
-    #[tracing::instrument(level = Level::WARN, fields(n_leaves = self.n_leaves))]
     pub fn get_proof(&self, leaf_index: usize) -> Result<MerkleProof, LeafIndexOutOfBounds> {
         tracing::trace!("computing Merkle proof");
         if leaf_index >= self.n_leaves {
             tracing::warn!("leaf index out of bounds");
             return Err(LeafIndexOutOfBounds(leaf_index));
         }
-        let mut path = Vec::with_capacity(
-            usize::try_from(self.n_leaves.ilog2()).expect("this is smaller than `n_leaves`") + 1,
-        );
+        let n_levels = n_levels_from_leaves(self.n_leaves);
+        let mut path = Vec::with_capacity(n_levels);
         let mut level_index = leaf_index;
-        let mut n_level = self.n_leaves;
-        let mut level_base_index = 0;
-        while n_level > 1 {
-            // All levels contain an even number of nodes
-            n_level = n_level.next_multiple_of(2);
+        let mut level = 0;
+        while level < n_levels - 1 {
             let sibling_index = if level_index % 2 == 0 {
-                level_base_index + level_index + 1
+                level_index + 1
             } else {
-                level_base_index + level_index - 1
+                level_index - 1
             };
-            path.push(self.nodes[sibling_index].clone());
+            path.push(
+                self.nodes[level]
+                    .get(sibling_index)
+                    .unwrap_or(&EMPTY_NODE)
+                    .clone(),
+            );
             // Index of the parent on the next level
             level_index /= 2;
-            level_base_index += n_level;
-            n_level /= 2;
+            level += 1;
         }
         Ok(MerkleProof { path })
     }
 
-    // TODO: implement function to add new leaves
+    /// Add a new leaf hash to the tree at the next available index.
+    pub fn add_leaf_hash(&mut self, leaf_hash: Digest) {
+        self.n_leaves += 1;
+        // Add a new leaf hash to the bottom level. The value doesn't matter as it will be
+        // overwritten by the call to `update_leaf_hash`. But we need to ensure that the
+        // element exists in the vector of the bottom level.
+        self.nodes[0].push(leaf_hash);
+        self.update_leaf_hash(self.n_leaves - 1, leaf_hash)
+            .expect("leaf index should be in bounds");
+    }
 
-    // TODO: implement function to update leaf
+    /// Add a new leaf to the tree at the next available index.
+    pub fn add_leaf(&mut self, leaf: &[u8]) {
+        self.add_leaf_hash(leaf_hash(leaf));
+    }
+
+    /// Update the leaf at `leaf_index` to have the provided digest.
+    pub fn update_leaf_hash(
+        &mut self,
+        leaf_index: usize,
+        leaf_hash: Digest,
+    ) -> Result<(), LeafIndexOutOfBounds> {
+        if leaf_index >= self.n_leaves {
+            tracing::warn!("leaf index out of bounds");
+            return Err(LeafIndexOutOfBounds(leaf_index));
+        }
+        let n_levels = n_levels_from_leaves(self.n_leaves);
+        if self.nodes.len() < n_levels {
+            self.nodes.push(Vec::new());
+        }
+        // Update the leaf node.
+        self.nodes[0][leaf_index] = leaf_hash;
+        // Update all the inner nodes on the path to the root.
+        let mut level = 1;
+        let mut level_index = leaf_index / 2;
+        while level < n_levels {
+            let prev_level_nodes = &self.nodes[level - 1];
+            let new_digest = inner_hash(
+                &prev_level_nodes[level_index * 2],
+                &prev_level_nodes
+                    .get(level_index * 2 + 1)
+                    .unwrap_or(&EMPTY_NODE),
+            );
+            if self.nodes[level].len() <= level_index {
+                self.nodes[level].push(new_digest);
+            } else {
+                self.nodes[level][level_index] = new_digest;
+            }
+            level_index /= 2;
+            level += 1;
+        }
+        Ok(())
+    }
+
+    /// Update the leaf at `leaf_index` to have the provided data.
+    pub fn update_leaf(
+        &mut self,
+        leaf_index: usize,
+        leaf: &[u8],
+    ) -> Result<(), LeafIndexOutOfBounds> {
+        self.update_leaf_hash(leaf_index, leaf_hash(leaf))
+    }
 }
 
 /// Computes the hash of the provided input to be used as a leaf hash of a Merkle tree.
 pub(crate) fn leaf_hash(input: &[u8]) -> Digest {
-    let mut hasher = Sha3_256::new();
-    hasher.update(LEAF_PREFIX);
-    hasher.update(input);
-    hasher.finalize().into()
+    leaf_hash!(input)
 }
 
 fn inner_hash(left: &Digest, right: &Digest) -> Digest {
@@ -195,43 +286,25 @@ fn inner_hash(left: &Digest, right: &Digest) -> Digest {
     hasher.finalize().into()
 }
 
-fn n_nodes(n_leaves: usize) -> usize {
-    let mut lvl_nodes = n_leaves;
-    let mut tot_nodes = 0;
-    while lvl_nodes > 1 {
-        lvl_nodes += lvl_nodes % 2;
-        tot_nodes += lvl_nodes;
-        lvl_nodes /= 2;
-    }
-    tot_nodes + lvl_nodes
+fn n_levels_from_leaves(n_leaves: usize) -> usize {
+    usize::try_from(n_leaves.next_power_of_two().ilog2()).expect("this is smaller than `n_leaves`")
+        + 1
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
 
+    const LEAF_PREFIX: [u8; 1] = [0];
+
     const TEST_INPUT: [&[u8]; 9] = [
         b"foo", b"bar", b"fizz", b"baz", b"buzz", b"fizz", b"foobar", b"walrus", b"fizz",
     ];
 
     #[test]
-    fn test_n_nodes() {
-        assert!(n_nodes(0) == 0);
-        assert!(n_nodes(1) == 1);
-        assert!(n_nodes(2) == 3);
-        assert!(n_nodes(3) == 7);
-        assert!(n_nodes(4) == 7);
-        assert!(n_nodes(5) == 13);
-        assert!(n_nodes(6) == 13);
-        assert!(n_nodes(7) == 15);
-        assert!(n_nodes(8) == 15);
-        assert!(n_nodes(9) == 23);
-    }
-
-    #[test]
     fn test_merkle_tree_empty() {
         let mt: MerkleTree = MerkleTree::build::<[&[u8]; 0]>([]);
-        assert_eq!(mt.root(), EMPTY_NODE);
+        assert_eq!(mt.root(), &EMPTY_NODE);
     }
 
     #[test]
@@ -241,7 +314,7 @@ mod test {
         let mut hasher = Sha3_256::new();
         hasher.update(LEAF_PREFIX);
         hasher.update(test_inp.as_bytes());
-        assert_eq!(mt.root(), Digest::from(hasher.finalize()));
+        assert_eq!(mt.root(), &Digest::from(hasher.finalize()));
     }
 
     #[test]
@@ -250,7 +323,7 @@ mod test {
         let mut hasher = Sha3_256::new();
         hasher.update(LEAF_PREFIX);
         hasher.update([]);
-        assert_eq!(mt.root(), Digest::from(hasher.finalize()));
+        assert_eq!(mt.root(), &Digest::from(hasher.finalize()));
     }
 
     #[test]
@@ -278,6 +351,29 @@ mod test {
                 let proof = mt.get_proof(index).unwrap();
                 assert!(proof.verify_proof(&mt.root(), leaf_data, index));
             }
+        }
+    }
+
+    #[test]
+    fn test_update_and_verify_path() {
+        for i in 0..TEST_INPUT.len() {
+            let mut mt: MerkleTree = MerkleTree::build(&TEST_INPUT[..i]);
+            for (index, leaf_data) in TEST_INPUT[..i].iter().enumerate() {
+                let proof = mt.get_proof(index).unwrap();
+                assert!(proof.verify_proof(&mt.root(), leaf_data, index));
+                mt.update_leaf(index, "new value".as_bytes()).unwrap();
+                assert!(proof.verify_proof(&mt.root(), "new value".as_bytes(), index));
+            }
+        }
+    }
+
+    #[test]
+    fn test_add_leaf() {
+        let mut updated_mt: MerkleTree = MerkleTree::build::<[&[u8]; 0]>([]);
+        for i in 0..TEST_INPUT.len() {
+            updated_mt.add_leaf(TEST_INPUT[i]);
+            let mt: MerkleTree = MerkleTree::build(&TEST_INPUT[..i + 1]);
+            assert_eq!(updated_mt.root(), mt.root());
         }
     }
 

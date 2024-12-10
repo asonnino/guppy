@@ -7,6 +7,9 @@ elf/
 # Cargo config
 .cargo
 
+# Logs
+*.log
+
 # Profile-guided optimization
 /tmp
 pgo-data.profdata

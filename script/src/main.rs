@@ -22,6 +22,18 @@ struct Args {
     /// Use Minnow MT program instead of Minnow H program.
     #[clap(long, short, action)]
     merkle_tree: bool,
+
+    /// The number of streams to track.
+    #[clap(long, short, default_value_t = 1)]
+    state_size: usize,
+
+    /// The number of updates per checkpoint.
+    #[clap(long, default_value_t = 10)]
+    num_checkpoint_updates: usize,
+
+    /// The number of checkpoints to generate.
+    #[clap(long, default_value_t = 100)]
+    num_checkpoints: usize,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -32,9 +44,17 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let proof_env = if args.merkle_tree {
-        minnow_mt::run()?
+        minnow_mt::run(
+            args.state_size,
+            args.num_checkpoint_updates,
+            args.num_checkpoints,
+        )?
     } else {
-        minnow_h::run()?
+        minnow_h::run(
+            args.state_size,
+            args.num_checkpoint_updates,
+            args.num_checkpoints,
+        )?
     };
 
     if args.prove {

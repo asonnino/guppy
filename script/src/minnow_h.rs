@@ -1,50 +1,29 @@
 use minnow_lib::{
-    check_sorted,
     commit_batch_updates,
-    generate_hints_batch_and_process_batch_updates,
+    minnow_h::{HintsBatch, MinnowHServiceState},
     BatchCheckpointUpdates,
     CheckpointUpdates,
-    HintsBatch,
-    ZKServiceState,
+    StreamPoint,
 };
 use rkyv::{rancor::Error, to_bytes};
 use sp1_sdk::{include_elf, HashableKey, ProverClient, SP1Proof, SP1Stdin, SP1VerifyingKey};
 
-use crate::common::ProverEnv;
+use crate::common::{generate_sample_batch_updates, ProverEnv};
 
 /// The ELF (executable and linkable format) file for the Succinct RISC-V zkVM.
 pub const MINNOW_H_ELF: &[u8] = include_elf!("minnow-h-program");
 
-const STATE_SIZE: usize = 1;
-const NUM_CHECKPOINT_UPDATES: usize = 10;
-const NUM_CHECKPOINTS: usize = 100;
-
-fn generate_sample_batch_updates(start_idx: usize) -> BatchCheckpointUpdates {
-    let mut all_checkpoint_updates = Vec::new();
-    for i in 0..NUM_CHECKPOINTS {
-        let mut next_checkpoint_updates = CheckpointUpdates::new();
-        for j in 0..NUM_CHECKPOINT_UPDATES {
-            next_checkpoint_updates.push((
-                (i * NUM_CHECKPOINT_UPDATES + j).try_into().unwrap(),
-                [(i + start_idx) as u8; 32],
-            ));
-        }
-        assert!(check_sorted(&next_checkpoint_updates));
-        all_checkpoint_updates.push(next_checkpoint_updates);
-    }
-    BatchCheckpointUpdates(all_checkpoint_updates)
-}
-
 fn write_all_inputs(
     stdin: &mut SP1Stdin,
-    global_state: &ZKServiceState,
+    global_state: &MinnowHServiceState,
     batch_updates: &BatchCheckpointUpdates,
     hints: &HintsBatch,
     vk_and_proof: Option<(SP1VerifyingKey, SP1Proof)>,
     local_commitment: &[u8; 32],
 ) {
     // 1. Write the service's global state
-    stdin.write(global_state);
+    let serialized_global_state = to_bytes::<Error>(global_state).unwrap();
+    stdin.write_slice(&serialized_global_state);
 
     // 2. Write the batch of checkpoint updates
     let serialized_batch_updates = to_bytes::<Error>(batch_updates).unwrap();
@@ -70,22 +49,28 @@ fn write_all_inputs(
     }
 }
 
-pub fn run() -> anyhow::Result<ProverEnv<'static>> {
+pub fn run(
+    state_size: usize,
+    num_checkpoint_updates: usize,
+    num_checkpoints: usize,
+) -> anyhow::Result<ProverEnv<'static>> {
     let client = ProverClient::new();
     let (pk, vk) = client.setup(MINNOW_H_ELF);
 
-    let mut global_state = ZKServiceState::new();
+    let mut global_state = Vec::new();
     // For all supported streams, initialize the global state with a value of 0.
-    for i in 0..STATE_SIZE {
-        global_state.push((i.try_into().unwrap(), [0u8; 32]));
+    for i in 0..state_size {
+        global_state.push(StreamPoint::new(i.try_into().unwrap(), [0u8; 32]));
     }
+    let mut prev_global_state: MinnowHServiceState = global_state.into();
+    let mut new_global_state = prev_global_state.clone();
     let mut first_checkpoint_updates = CheckpointUpdates::new();
-    for i in 0..NUM_CHECKPOINT_UPDATES {
-        first_checkpoint_updates.push((i.try_into().unwrap(), [i as u8; 32]));
+    for i in 0..num_checkpoint_updates {
+        first_checkpoint_updates.push(StreamPoint::new(i.try_into().unwrap(), [i as u8; 32]));
     }
     let first_batch_updates = BatchCheckpointUpdates(vec![first_checkpoint_updates]);
-    let (hints, new_global_state) =
-        generate_hints_batch_and_process_batch_updates(&first_batch_updates, &global_state);
+    let hints =
+        new_global_state.generate_hints_batch_and_process_batch_updates(&first_batch_updates);
 
     let mut local_commitment = [0u8; 32];
 
@@ -98,7 +83,7 @@ pub fn run() -> anyhow::Result<ProverEnv<'static>> {
         // Set vk to None to skip proof verification
         write_all_inputs(
             &mut stdin,
-            &global_state,
+            &prev_global_state,
             &first_batch_updates,
             &hints,
             None,
@@ -110,17 +95,18 @@ pub fn run() -> anyhow::Result<ProverEnv<'static>> {
 
     // Apply the first batch of updates
     local_commitment = commit_batch_updates(&first_batch_updates, &local_commitment);
-    global_state = new_global_state;
+    prev_global_state = new_global_state.clone();
 
     // Sample updates simulating changes in the next c checkpoints
-    let second_batch_updates = generate_sample_batch_updates(2);
-    let (hints, _new_global_state) =
-        generate_hints_batch_and_process_batch_updates(&second_batch_updates, &global_state);
+    let second_batch_updates =
+        generate_sample_batch_updates(num_checkpoints, num_checkpoint_updates, 2);
+    let hints =
+        new_global_state.generate_hints_batch_and_process_batch_updates(&second_batch_updates);
 
     let mut stdin = SP1Stdin::new();
     write_all_inputs(
         &mut stdin,
-        &global_state,
+        &prev_global_state,
         &second_batch_updates,
         &hints,
         Some((vk.clone(), starter_proof.proof)),
