@@ -126,6 +126,8 @@ pub struct MinnowMTStateUpdates {
 }
 
 impl MinnowMTStateUpdates {
+    // In the worst case, it iterates over all the tracked streams and all the checkpoint updates.
+    // This is O(n + m) where n is the number of tracked streams and m is the number of checkpoint updates.
     pub fn process_single_checkpoint_update(
         &self,
         tracked_streams: &[StreamID],

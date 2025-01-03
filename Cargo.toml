@@ -3,12 +3,11 @@ members = [
     "minnow-lib",
     "minnow-h-program",
     "minnow-mt-program",
-    "script",
+    "script", "minnow-mt-plonky2",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-alloy-sol-types = "0.7.7"
 rkyv = "0.8.9"
 minnow-lib = { path = "minnow-lib" }
 anyhow = "1.0.93"

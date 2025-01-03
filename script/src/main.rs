@@ -44,12 +44,16 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let proof_env = if args.merkle_tree {
+        println!("=======Minnow-MT=======");
+        println!("State size: {}", args.state_size);
         minnow_mt::run(
             args.state_size,
             args.num_checkpoint_updates,
             args.num_checkpoints,
         )?
     } else {
+        println!("=======Minnow-H=======");
+        println!("State size: {}", args.state_size);
         minnow_h::run(
             args.state_size,
             args.num_checkpoint_updates,
@@ -86,7 +90,7 @@ fn main() -> anyhow::Result<()> {
             "Executed program with {} cycles",
             report.total_instruction_count() + report.total_syscall_count()
         );
-        println!("Full execution report:\n{:?}", report);
+        // println!("Full execution report:\n{:?}", report);
     }
 
     Ok(())

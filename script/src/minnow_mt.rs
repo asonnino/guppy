@@ -55,6 +55,24 @@ fn write_all_inputs(
     }
 }
 
+fn compute_percent_state_touched(
+    state_update_proofs: &BatchMinnowMTStateUpdates,
+    state_size: usize
+) {
+    let num_checkpoints = state_update_proofs.checkpoint_updates.len();
+    let count = state_update_proofs
+        .checkpoint_updates
+        .iter()
+        .map(|updates| updates.stream_update_proofs.len())
+        .sum::<usize>();
+    assert!(count <= state_size * num_checkpoints);
+    println!(
+        "{:.2}% of the state was updated ({} proofs)",
+        (count as f64 / (state_size * num_checkpoints) as f64) * 100.0,
+        count
+    );
+}
+
 pub fn run(
     state_size: usize,
     num_checkpoint_updates: usize,
@@ -79,6 +97,7 @@ pub fn run(
     let mut local_commitment = [0u8; 32];
 
     let state_update_proofs = global_state.process_batch_checkpoint_updates(&first_batch_updates);
+    compute_percent_state_touched(&state_update_proofs, state_size);
 
     // Genesis proof
     let starter_proof = tracing::info_span!("generate starter proof").in_scope(|| {
@@ -108,6 +127,7 @@ pub fn run(
     let second_batch_updates =
         generate_sample_batch_updates(num_checkpoints, num_checkpoint_updates, 2);
     let state_update_proofs = global_state.process_batch_checkpoint_updates(&second_batch_updates);
+    compute_percent_state_touched(&state_update_proofs, state_size);
 
     let mut stdin = SP1Stdin::new();
     write_all_inputs(

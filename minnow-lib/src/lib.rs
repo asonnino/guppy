@@ -1,4 +1,4 @@
-use rkyv::{Archive, Deserialize, Serialize};
+use rkyv::{to_bytes, rancor::Error, Archive, Deserialize, Serialize};
 use sha3::{Digest as OtherDigest, Sha3_256};
 
 pub mod minnow_h;
@@ -18,12 +18,16 @@ impl StreamPoint {
     pub fn new(id: StreamID, digest: Digest) -> Self {
         Self { id, digest }
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        to_bytes::<Error>(self).unwrap().to_vec()
+    }
 }
 
 // The updates from a single checkpoint. The size is m
 pub type CheckpointUpdates = Vec<StreamPoint>;
 // The updates from multiple checkpoints. The size of a batch is c
-#[derive(Serialize, Deserialize, Archive)]
+#[derive(Serialize, Deserialize, Archive, Debug)]
 pub struct BatchCheckpointUpdates(pub Vec<CheckpointUpdates>);
 
 pub fn check_sorted(u: &CheckpointUpdates) -> bool {
@@ -31,7 +35,6 @@ pub fn check_sorted(u: &CheckpointUpdates) -> bool {
 }
 
 // O(m) hashes
-#[sp1_derive::cycle_tracker]
 pub fn commit_batch_updates(batch: &BatchCheckpointUpdates, d_prev: &Digest) -> Digest {
     let mut d = *d_prev;
     for checkpoint_updates in &batch.0 {
@@ -50,7 +53,6 @@ pub fn commit_single_update(l: &CheckpointUpdates, d_prev: &Digest) -> Digest {
     hasher.finalize().into()
 }
 
-#[sp1_derive::cycle_tracker]
 pub fn commit_stream_ids(stream_ids: &[u32]) -> Digest {
     let mut hasher = Sha3_256::new();
     for stream_id in stream_ids {
@@ -64,6 +66,13 @@ mod tests {
     use std::vec;
 
     use super::*;
+
+    #[test]
+    fn test_stream_point_serialization() {
+        let stream_point = StreamPoint::new(123, [42u8; 32]);
+        let serialized_stream_point = stream_point.to_bytes();
+        assert!(serialized_stream_point.len() == 36);
+    }
 
     #[test]
     fn test_commit_single_checkpoint_updates() {
