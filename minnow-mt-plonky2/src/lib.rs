@@ -5,6 +5,8 @@ use merkle::{MerkleProof, MerkleProofTargets, MerkleTree};
 pub mod circuit;
 use circuit::{Digest, MyPartialWitness as PartialWitness, F, H};
 
+pub mod utils;
+
 use plonky2::field::types::Field;
 use plonky2::plonk::config::Hasher;
 

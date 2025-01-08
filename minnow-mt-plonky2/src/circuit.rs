@@ -1,4 +1,5 @@
 use log::debug;
+use log::info;
 use plonky2::gates::noop::NoopGate;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
@@ -41,11 +42,26 @@ fn estimate_degree_bits(max_levels: usize, num_checkpoint_updates: usize) -> usi
     return log2_ceil(num_gates);
 }
 
+fn print_system_info(num_levels: usize, num_checkpoint_updates: usize) {
+    info!(
+        "Max Merkle tree levels: {} ({} elements)",
+        num_levels,
+        1 << (num_levels - 1)
+    );
+    info!(
+        "Number of checkpoint updates (fixed): {}",
+        num_checkpoint_updates
+    );
+}
+
 // Returns the circuit along with the target wires needed to be set before proving
 pub fn build_circuit(
     num_levels: usize,
     num_checkpoint_updates: usize,
+    degree_bits: Option<usize>,
 ) -> (CircuitData<F, C, D>, AllTargets) {
+    print_system_info(num_levels, num_checkpoint_updates);
+
     // Public inputs:
     // (i) zk service's state root,
     // (ii) checkpoint commitment,
@@ -125,7 +141,8 @@ pub fn build_circuit(
     let counter = builder.add_virtual_public_input();
     builder.register_public_input(out_num_leaves_t);
 
-    let expected_degree_bits = estimate_degree_bits(num_levels, num_checkpoint_updates);
+    let expected_degree_bits =
+        degree_bits.unwrap_or_else(|| estimate_degree_bits(num_levels, num_checkpoint_updates));
     debug!("Expected degree: 2^{}", expected_degree_bits);
     let verifier_data_target = builder.add_verifier_data_public_inputs();
     let common_data = common_data_for_recursion(expected_degree_bits, builder.num_public_inputs());

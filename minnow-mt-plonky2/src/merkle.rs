@@ -389,10 +389,6 @@ impl MerkleTree {
         leaf: &StreamPoint,
     ) -> Result<(), LeafIndexOutOfBounds> {
         trace!("updating leaf {} at index {}", leaf.id, leaf_index);
-        if leaf_index >= self.real_leaves {
-            warn!("leaf index out of bounds");
-            return Err(LeafIndexOutOfBounds(leaf_index));
-        }
         self.leaves[leaf_index] = leaf.encode();
         self.update_leaf_hash(
             leaf_index,
