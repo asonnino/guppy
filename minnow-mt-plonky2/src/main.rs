@@ -32,7 +32,8 @@ struct Args {
     #[arg(short, long, default_value_t = 300)]
     checkpoint_updates: usize,
 
-    #[arg(short, long)]
+    /// Logarithmic estimate of the number of gates
+    #[arg(short = 'g', long)]
     degree_bits: Option<usize>,
 
     /// Build the circuit only, don't prove

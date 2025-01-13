@@ -13,6 +13,7 @@ use plonky2::plonk::config::Hasher;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::util::log2_ceil;
+use plonky2::with_context;
 
 use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::get_initial_root;
@@ -86,57 +87,65 @@ pub fn build_circuit(
     let one = builder.one();
     let zero = builder.zero();
 
-    for _ in 0..num_checkpoint_updates {
-        // i) Check inclusion proof
-        let t_cur = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
-        builder.connect_hashes(t_cur.root_t, out_root_t);
-        prev_targets.push(t_cur.clone());
+    with_context!(builder, "process checkpoint updates", {
+        for _ in 0..num_checkpoint_updates {
+            let t_cur: MerkleProofTargets;
+            let t_new: MerkleProofTargets;
+            // i) Check inclusion proof
+            t_cur = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
+            builder.connect_hashes(t_cur.root_t, out_root_t);
+            prev_targets.push(t_cur.clone());
 
-        // ii) Check inclusion proof after update
-        let t_new = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
-        new_targets.push(t_new.clone());
+            // ii) Check inclusion proof after update
+            t_new = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
+            new_targets.push(t_new.clone());
 
-        // iii) Connect the siblings
-        assert_eq!(t_cur.proof_t.siblings.len(), t_new.proof_t.siblings.len());
-        for i in 0..t_cur.proof_t.siblings.len() {
-            builder.connect_hashes(t_cur.proof_t.siblings[i], t_new.proof_t.siblings[i]);
+            // iii) Connect the siblings
+            assert_eq!(t_cur.proof_t.siblings.len(), t_new.proof_t.siblings.len());
+            for i in 0..t_cur.proof_t.siblings.len() {
+                builder.connect_hashes(t_cur.proof_t.siblings[i], t_new.proof_t.siblings[i]);
+            }
+
+            // (iv) Logic: If old leaf, check that stream IDs match. If new leaf, check that index is incremented.
+            // if t_new.leaf_t.new_flag_t
+            //  then assert (t_new.index_t == num_leaves) && (num_leaves += 1)
+            // else assert (t_new.index_t == t_cur.index_t) && (t_new.leaf_t.stream_id_t == t_cur.leaf_t.stream_id_t)
+            let b1 = builder.is_equal(t_new.index_t, out_num_leaves_t);
+            let b2 = builder.is_equal(t_new.leaf_t.stream_id_t, t_cur.leaf_t.stream_id_t);
+            let b3 = builder.is_equal(t_new.index_t, t_cur.index_t);
+            let new_flag = t_new.leaf_t.new_flag_t;
+
+            // if new_flag then b1 = true
+            let b5 = builder.select(new_flag, b1.target, one);
+            builder.assert_one(b5);
+
+            let next_index = builder.add(out_num_leaves_t, one);
+            out_num_leaves_t = builder.select(new_flag, next_index, out_num_leaves_t);
+
+            // if not new_flag then b2 = true
+            let b6 = builder.select(new_flag, one, b2.target);
+            builder.assert_one(b6);
+
+            // if not new_flag then b3 = true
+            let b7 = builder.select(new_flag, one, b3.target);
+            builder.assert_one(b7);
+
+            // v) MerkleLeaf === StreamPoint, so we can use the same targets to compute the checkpoint commitment
+            checkpoint_commitment_inputs.extend(t_new.leaf_t.get_all_targets());
+
+            // vi) Update the current root
+            out_root_t = t_new.root_t;
         }
+    });
 
-        // (iv) Logic: If old leaf, check that stream IDs match. If new leaf, check that index is incremented.
-        // if t_new.leaf_t.new_flag_t
-        //  then assert (t_new.index_t == num_leaves) && (num_leaves += 1)
-        // else assert (t_new.index_t == t_cur.index_t) && (t_new.leaf_t.stream_id_t == t_cur.leaf_t.stream_id_t)
-        let b1 = builder.is_equal(t_new.index_t, out_num_leaves_t);
-        let b2 = builder.is_equal(t_new.leaf_t.stream_id_t, t_cur.leaf_t.stream_id_t);
-        let b3 = builder.is_equal(t_new.index_t, t_cur.index_t);
-        let new_flag = t_new.leaf_t.new_flag_t;
-
-        // if new_flag then b1 = true
-        let b5 = builder.select(new_flag, b1.target, one);
-        builder.assert_one(b5);
-
-        let next_index = builder.add(out_num_leaves_t, one);
-        out_num_leaves_t = builder.select(new_flag, next_index, out_num_leaves_t);
-
-        // if not new_flag then b2 = true
-        let b6 = builder.select(new_flag, one, b2.target);
-        builder.assert_one(b6);
-
-        // if not new_flag then b3 = true
-        let b7 = builder.select(new_flag, one, b3.target);
-        builder.assert_one(b7);
-
-        // v) MerkleLeaf === StreamPoint, so we can use the same targets to compute the checkpoint commitment
-        checkpoint_commitment_inputs.extend(t_new.leaf_t.get_all_targets());
-
-        // vi) Update the current root
-        out_root_t = t_new.root_t;
-    }
     // Register the final root as a public input
     builder.register_public_inputs(&out_root_t.elements);
 
     let cur_checkpoint_head = builder.add_virtual_hash_public_input();
-    let checkpoint_commitment = builder.hash_or_noop::<H>(checkpoint_commitment_inputs);
+    let checkpoint_commitment: HashOutTarget;
+    with_context!(builder, "hash checkpoint commitment", {
+        checkpoint_commitment = builder.hash_or_noop::<H>(checkpoint_commitment_inputs);
+    });
 
     let counter = builder.add_virtual_public_input();
     builder.register_public_input(out_num_leaves_t);
@@ -198,13 +207,15 @@ pub fn build_circuit(
     let actual_in_num_leaves = builder.select(condition, inner_num_leaves, zero);
     builder.connect(in_num_leaves_t, actual_in_num_leaves);
 
-    builder
-        .conditionally_verify_cyclic_proof_or_dummy::<C>(
-            condition,
-            &inner_cyclic_proof_with_pis,
-            &common_data,
-        )
-        .unwrap();
+    with_context!(builder, "verify inner proof", {
+        builder
+            .conditionally_verify_cyclic_proof_or_dummy::<C>(
+                condition,
+                &inner_cyclic_proof_with_pis,
+                &common_data,
+            )
+            .unwrap();
+    });
 
     let all_targets = AllTargets {
         condition,
