@@ -66,9 +66,14 @@ pub fn build_circuit(
     // Public inputs:
     // (i) zk service's state root,
     // (ii) checkpoint commitment,
-    // (iii) counter / checkpoint number,
-    // (iv) total number of leaves,
-    // (v) verifier data
+    // (iii) counter / checkpoint number (NOTE: Probably not needed for any security purpose..),
+    // (iv) verifier data
+    // (v) num_leaves
+
+    // Private inputs:
+    // (i) total number of leaves,
+    // (ii) condition
+
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -233,7 +238,7 @@ pub fn build_circuit(
 }
 
 // Generates `CommonCircuitData` usable for recursion.
-fn common_data_for_recursion(
+pub fn common_data_for_recursion(
     expected_degree_bits: usize,
     num_public_inputs: usize,
 ) -> CommonCircuitData<F, D> {

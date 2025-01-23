@@ -3,10 +3,10 @@ use minnow_mt_plonky2::circuit::build_circuit;
 use minnow_mt_plonky2::circuit::AllTargets;
 use minnow_mt_plonky2::circuit::Digest;
 use minnow_mt_plonky2::commit_single_update;
+use minnow_mt_plonky2::utils::generate_sample_checkpoint_updates;
 use minnow_mt_plonky2::utils::init_logging;
 use minnow_mt_plonky2::CheckpointUpdates;
 use minnow_mt_plonky2::MinnowMTServiceState;
-use minnow_mt_plonky2::StreamPoint;
 use plonky2::field::types::Field;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
@@ -76,39 +76,6 @@ fn apply_checkpoint_updates_and_set_witness(
         checkpoint_number
     );
     pw
-}
-
-// Test vector: All checkpoints update the same set of stream points
-fn generate_sample_checkpoint_updates(
-    num_checkpoints: usize,
-    num_checkpoint_updates: usize,
-) -> Vec<CheckpointUpdates> {
-    let start_checkpoint_number = 0;
-    let mut all_updates = Vec::new();
-    let first_set = (0..num_checkpoint_updates)
-        .map(|i| {
-            StreamPoint::new_with_flag(
-                i.try_into().unwrap(),
-                [start_checkpoint_number as u8; 32],
-                true,
-            )
-        })
-        .collect();
-    all_updates.push(first_set);
-    for _ in 1..num_checkpoints {
-        all_updates.push(
-            (0..num_checkpoint_updates)
-                .map(|i| {
-                    StreamPoint::new_with_flag(
-                        i.try_into().unwrap(),
-                        [(start_checkpoint_number + i) as u8; 32],
-                        false,
-                    )
-                })
-                .collect(),
-        );
-    }
-    all_updates
 }
 
 fn main() {

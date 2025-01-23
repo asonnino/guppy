@@ -1,0 +1,11 @@
+[package]
+name = "minnow-h-plonky2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap.workspace = true
+plonky2.workspace = true
+minnow-mt-plonky2.workspace = true
+log.workspace = true
+hashbrown.workspace = true

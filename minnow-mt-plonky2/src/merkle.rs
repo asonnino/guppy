@@ -50,12 +50,35 @@ impl LeafTarget {
         }
     }
 
+    pub fn from_existing(
+        stream_id_t: Target,
+        stream_val_t: Vec<Target>,
+        new_flag_t: BoolTarget,
+    ) -> Self {
+        Self {
+            stream_id_t,
+            stream_val_t,
+            new_flag_t,
+        }
+    }
+
     pub fn get_all_targets(&self) -> Vec<Target> {
         let mut targets = vec![self.stream_id_t];
         targets.extend(self.stream_val_t.iter().cloned());
         targets.push(self.new_flag_t.target);
         assert_eq!(targets.len(), LEAF_LEN_F);
         targets
+    }
+
+    pub fn set_proof_targets(&self, pw: &mut PartialWitness, encoded_leaf_data: &MerkleLeaf) {
+        pw.set_target(self.stream_id_t, encoded_leaf_data.stream_id_f)
+            .unwrap();
+        for i in 0..encoded_leaf_data.stream_val_f.len() {
+            pw.set_target(self.stream_val_t[i], encoded_leaf_data.stream_val_f[i])
+                .unwrap();
+        }
+        pw.set_target(self.new_flag_t.target, encoded_leaf_data.new_flag_f)
+            .unwrap();
     }
 }
 
@@ -178,20 +201,7 @@ impl MerkleProof {
         pw.set_hash_target(targets.root_t, *root).unwrap();
         pw.set_target(targets.index_t, F::from_canonical_usize(leaf_index))
             .unwrap();
-        pw.set_target(targets.leaf_t.stream_id_t, encoded_leaf_data.stream_id_f)
-            .unwrap();
-        for i in 0..encoded_leaf_data.stream_val_f.len() {
-            pw.set_target(
-                targets.leaf_t.stream_val_t[i],
-                encoded_leaf_data.stream_val_f[i],
-            )
-            .unwrap();
-        }
-        pw.set_target(
-            targets.leaf_t.new_flag_t.target,
-            encoded_leaf_data.new_flag_f,
-        )
-        .unwrap();
+        targets.leaf_t.set_proof_targets(pw, encoded_leaf_data);
     }
 }
 
