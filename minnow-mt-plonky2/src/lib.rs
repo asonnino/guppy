@@ -111,11 +111,12 @@ pub struct MinnowMTServiceState {
 }
 
 impl MinnowMTServiceState {
-    pub fn new(stream_points: &[StreamPoint], num_levels: usize) -> Self {
+    pub fn new(stream_points: &[StreamPoint], max_log_state_size: usize) -> Self {
         let mut stream_id_to_idx = HashMap::new();
         for (i, stream_point) in stream_points.iter().enumerate() {
             stream_id_to_idx.insert(stream_point.id, i);
         }
+        let num_levels = max_log_state_size + 1;
         let merkle_tree = MerkleTree::build_from_stream_points(stream_points, num_levels);
         Self {
             merkle_tree,

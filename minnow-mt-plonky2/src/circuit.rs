@@ -29,7 +29,12 @@ pub type InnerHasher = <C as GenericConfig<D>>::InnerHasher;
 pub type MyCircuitBuilder = CircuitBuilder<F, D>;
 pub type MyPartialWitness = PartialWitness<F>;
 
-pub struct AllTargets {
+pub struct MinnowMTCircuit {
+    pub circuit_data: CircuitData<F, C, D>,
+    pub private_inputs: PrivateInputs,
+}
+
+pub struct PrivateInputs {
     pub condition: BoolTarget,
     pub inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
     pub verifier_data_target: VerifierCircuitTarget,
@@ -57,10 +62,11 @@ fn print_system_info(num_levels: usize, num_checkpoint_updates: usize) {
 
 // Returns the circuit along with the target wires needed to be set before proving
 pub fn build_circuit(
-    num_levels: usize,
+    state_size: usize,
     num_checkpoint_updates: usize,
     degree_bits: Option<usize>,
-) -> (CircuitData<F, C, D>, AllTargets) {
+) -> MinnowMTCircuit {
+    let num_levels = state_size + 1;
     print_system_info(num_levels, num_checkpoint_updates);
 
     // Public inputs:
@@ -222,7 +228,7 @@ pub fn build_circuit(
             .unwrap();
     });
 
-    let all_targets = AllTargets {
+    let all_targets = PrivateInputs {
         condition,
         inner_cyclic_proof_with_pis,
         verifier_data_target,
@@ -234,7 +240,10 @@ pub fn build_circuit(
     builder.print_gate_counts(0);
     debug!("================================================");
 
-    (builder.build::<C>(), all_targets)
+    MinnowMTCircuit {
+        circuit_data: builder.build::<C>(),
+        private_inputs: all_targets,
+    }
 }
 
 // Generates `CommonCircuitData` usable for recursion.
@@ -268,7 +277,51 @@ pub fn common_data_for_recursion(
 
     // Build the circuit
     let mut common_data = builder.build::<C>().common;
-    assert!(common_data.degree_bits() == expected_degree_bits);
+    assert_eq!(common_data.degree_bits(), expected_degree_bits);
     common_data.num_public_inputs = num_public_inputs;
     common_data
+}
+
+mod test {
+    use log::LevelFilter;
+    use crate::utils::init_logging;
+    use super::*;
+
+    #[test]
+    fn test_common_data_for_recursion_basic() {
+        // init_logging(LevelFilter::Debug);
+        let expected_degree_bits = 14;
+        let num_public_inputs = 10;
+        let common_data = common_data_for_recursion(expected_degree_bits, num_public_inputs);
+        assert_eq!(common_data.degree_bits(), expected_degree_bits);
+    }
+
+    #[test]
+    fn test_common_data_for_recursion_full() {
+        let expected_degree_bits = 14;
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let _verifier_data_target = builder.add_verifier_data_public_inputs();
+        let common_data = common_data_for_recursion(expected_degree_bits, builder.num_public_inputs());
+        assert_eq!(common_data.degree_bits(), expected_degree_bits);
+
+        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
+        let condition = builder.add_virtual_bool_target_safe();
+        builder.conditionally_verify_cyclic_proof_or_dummy::<C>(
+            condition,
+            &inner_cyclic_proof_with_pis,
+            &common_data,
+        )
+        .unwrap();
+
+        // Doing it twice just to reach the expected gate count.
+        builder.conditionally_verify_cyclic_proof_or_dummy::<C>(
+            condition,
+            &inner_cyclic_proof_with_pis,
+            &common_data,
+        )
+        .unwrap();
+        builder.print_gate_counts(0);
+        builder.build::<C>().common;
+    }
 }

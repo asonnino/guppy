@@ -11,3 +11,6 @@ tracing.workspace = true
 thiserror.workspace = true
 clap.workspace = true
 plonky2.workspace = true
+
+[dev-dependencies]
+rstest = "0.18.2"

@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use minnow_mt_plonky2::circuit::build_circuit;
-use minnow_mt_plonky2::circuit::AllTargets;
 use minnow_mt_plonky2::circuit::Digest;
+use minnow_mt_plonky2::circuit::PrivateInputs;
 use minnow_mt_plonky2::commit_single_update;
 use minnow_mt_plonky2::utils::generate_sample_checkpoint_updates;
 use minnow_mt_plonky2::utils::init_logging;
@@ -26,9 +26,11 @@ use minnow_mt_plonky2::circuit::{C, D, F};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = 11)]
+    /// 2^state_size leaves in the Merkle tree
+    #[arg(short, long, default_value_t = 10)]
     state_size: usize,
 
+    /// Number of checkpoint updates
     #[arg(short, long, default_value_t = 300)]
     checkpoint_updates: usize,
 
@@ -40,6 +42,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     build_only: bool,
 
+    /// Debug logs
     #[arg(short, long, default_value_t = false)]
     debug: bool,
 }
@@ -48,30 +51,30 @@ fn apply_checkpoint_updates_and_set_witness(
     checkpoint_number: usize,
     checkpoint_updates: &CheckpointUpdates,
     zk_service_state: &mut MinnowMTServiceState,
-    all_targets: &AllTargets,
+    all_inputs: &PrivateInputs,
     prev_proof: &ProofWithPublicInputs<F, C, D>,
     base_case: bool,
     verifier_data: &VerifierOnlyCircuitData<C, D>,
 ) -> PartialWitness<F> {
-    info!(
+    debug!(
         "apply_checkpoint_updates_and_set_witness: start ({})",
         checkpoint_number
     );
     let mut pw = PartialWitness::new();
-    pw.set_bool_target(all_targets.condition, !base_case)
+    pw.set_bool_target(all_inputs.condition, !base_case)
         .unwrap();
-    pw.set_proof_with_pis_target(&all_targets.inner_cyclic_proof_with_pis, &prev_proof)
+    pw.set_proof_with_pis_target(&all_inputs.inner_cyclic_proof_with_pis, &prev_proof)
         .unwrap();
-    pw.set_verifier_data_target(&all_targets.verifier_data_target, verifier_data)
+    pw.set_verifier_data_target(&all_inputs.verifier_data_target, verifier_data)
         .unwrap();
 
     for (i, update) in checkpoint_updates.iter().enumerate() {
-        zk_service_state.add_proof_targets(&mut pw, &all_targets.prev_targets[i], &update.id);
+        zk_service_state.add_proof_targets(&mut pw, &all_inputs.prev_targets[i], &update.id);
         zk_service_state.update_leaf(&update);
-        zk_service_state.add_proof_targets(&mut pw, &all_targets.new_targets[i], &update.id);
+        zk_service_state.add_proof_targets(&mut pw, &all_inputs.new_targets[i], &update.id);
     }
 
-    info!(
+    debug!(
         "apply_checkpoint_updates_and_set_witness: end ({})",
         checkpoint_number
     );
@@ -88,20 +91,19 @@ fn main() {
         init_logging(LevelFilter::Info);
     }
 
-    let num_levels = args.state_size;
+    let state_size = args.state_size;
     let num_checkpoint_updates = args.checkpoint_updates;
     let degree_bits = args.degree_bits;
-    let (cyclic_circuit_data, all_targets) =
-        build_circuit(num_levels, num_checkpoint_updates, degree_bits);
-    let verifier_data = &cyclic_circuit_data.verifier_only;
-    let common_data = &cyclic_circuit_data.common;
+    let circuit = build_circuit(state_size, num_checkpoint_updates, degree_bits);
+    let verifier_data = &circuit.circuit_data.verifier_only;
+    let common_data = &circuit.circuit_data.common;
     debug!("Degree: 2^{}", common_data.degree_bits());
 
     if args.build_only {
         return;
     }
 
-    let mut zk_service_state = MinnowMTServiceState::new(&[], num_levels);
+    let mut zk_service_state = MinnowMTServiceState::new(&[], state_size);
     let mut proof = cyclic_base_proof(&common_data, verifier_data, HashMap::<usize, F>::new());
     let mut prev_head = Digest::ZERO;
     let num_checkpoints = 10;
@@ -114,23 +116,22 @@ fn main() {
             c,
             &checkpoint_updates,
             &mut zk_service_state,
-            &all_targets,
+            &circuit.private_inputs,
             &proof,
             c == 0,
             verifier_data,
         );
 
         let start = Instant::now();
-        proof = cyclic_circuit_data.prove(pw).unwrap();
+        proof = circuit.circuit_data.prove(pw).unwrap();
         let end = Instant::now();
         info!(
             "{}th recursive proof generation time: {:?}",
             c + 1,
             end.duration_since(start)
         );
-        check_cyclic_proof_verifier_data(&proof, verifier_data, &cyclic_circuit_data.common)
-            .unwrap();
-        cyclic_circuit_data.verify(proof.clone()).unwrap();
+        check_cyclic_proof_verifier_data(&proof, verifier_data, &common_data).unwrap();
+        circuit.circuit_data.verify(proof.clone()).unwrap();
 
         // Tests checking the circuit logic
         assert_eq!(
@@ -150,5 +151,75 @@ fn main() {
         info!("{}th proof verified!", c + 1);
 
         prev_head = new_head;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn build(state_size: usize, num_checkpoint_updates: usize, degree_bits: Option<usize>) {
+        init_logging(LevelFilter::Debug);
+        println!("state_size: {}, num_checkpoint_updates: {}, degree_bits: {:?}", state_size, num_checkpoint_updates, degree_bits);
+        let circuit = build_circuit(state_size, num_checkpoint_updates, degree_bits);
+        assert_eq!(
+            circuit.circuit_data.common.degree_bits(),
+            degree_bits.unwrap()
+        );
+    }
+
+    #[rstest]
+    #[case(10, 350, 14)]
+    #[case(10, 900, 15)]
+    #[case(10, 2050, 16)]
+    #[case(10, 4300, 17)]
+    #[case(20, 200, 14)]
+    #[case(20, 500, 15)]
+    #[case(20, 1200, 16)]
+    #[case(20, 2550, 17)]
+    #[case(30, 100, 14)]
+    #[case(30, 350, 15)]
+    #[case(30, 850, 16)]
+    #[case(30, 1800, 17)]
+    fn test_limits_success(
+        #[case] state_size: usize,
+        #[case] num_checkpoint_updates: usize,
+        #[case] degree_bits: usize,
+    ) {
+        build(state_size, num_checkpoint_updates, Some(degree_bits));
+    }
+
+    #[rstest]
+    #[should_panic]
+    #[case(10, 350, 14)]
+    #[should_panic]
+    #[case(10, 900, 15)]
+    #[should_panic]
+    #[case(10, 2050, 16)]
+    #[should_panic]
+    #[case(10, 4300, 17)]
+    #[should_panic]
+    #[case(20, 200, 14)]
+    #[should_panic]
+    #[case(20, 500, 15)]
+    #[should_panic]
+    #[case(20, 1200, 16)]
+    #[should_panic]
+    #[case(20, 2550, 17)]
+    #[should_panic]
+    #[case(30, 100, 14)]
+    #[should_panic]
+    #[case(30, 350, 15)]
+    #[should_panic]
+    #[case(30, 850, 16)]
+    #[should_panic]
+    #[case(30, 1800, 17)]
+    fn test_limits_failure(
+        #[case] state_size: usize,
+        #[case] num_checkpoint_updates: usize,
+        #[case] degree_bits: usize,
+    ) {
+        build(state_size, num_checkpoint_updates + 50, Some(degree_bits));
     }
 }
