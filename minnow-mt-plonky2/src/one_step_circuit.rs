@@ -1,16 +1,14 @@
 use log::debug;
-use log::info;
-use plonky2::gates::noop::NoopGate;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::PartialWitness;
+use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::circuit_data::CommonCircuitData;
 use plonky2::plonk::circuit_data::VerifierCircuitTarget;
-use plonky2::plonk::config::Hasher;
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::util::log2_ceil;
 use plonky2::with_context;
@@ -18,18 +16,13 @@ use plonky2::with_context;
 use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::get_initial_root;
 use crate::merkle::MerkleProofTargets;
+use crate::utils::common_data_for_recursion;
+use crate::utils::print_system_info;
+use crate::utils::{Digest, C, D, F, H};
+use crate::CheckpointUpdates;
+use crate::MinnowMTServiceState;
 
-// Plonky2 setup
-pub const D: usize = 2;
-pub type C = PoseidonGoldilocksConfig;
-pub type F = <C as GenericConfig<D>>::F;
-pub type H = <C as GenericConfig<D>>::Hasher;
-pub type Digest = <H as Hasher<F>>::Hash;
-pub type InnerHasher = <C as GenericConfig<D>>::InnerHasher;
-pub type MyCircuitBuilder = CircuitBuilder<F, D>;
-pub type MyPartialWitness = PartialWitness<F>;
-
-pub struct MinnowMTCircuit {
+pub struct MinnowMTOneStepCircuit {
     pub circuit_data: CircuitData<F, C, D>,
     pub private_inputs: PrivateInputs,
 }
@@ -48,25 +41,67 @@ fn estimate_degree_bits(max_levels: usize, num_checkpoint_updates: usize) -> usi
     return log2_ceil(num_gates);
 }
 
-fn print_system_info(num_levels: usize, num_checkpoint_updates: usize) {
-    info!(
-        "Max Merkle tree levels: {} ({} elements)",
-        num_levels,
-        1 << (num_levels - 1)
-    );
-    info!(
-        "Number of checkpoint updates (fixed): {}",
-        num_checkpoint_updates
-    );
+impl MinnowMTOneStepCircuit {
+    pub fn new(
+        state_size: usize,
+        num_checkpoint_updates: usize,
+        degree_bits: Option<usize>,
+    ) -> Self {
+        build_circuit(state_size, num_checkpoint_updates, degree_bits)
+    }
+
+    pub fn apply_checkpoint_updates_and_set_inputs(
+        &self,
+        checkpoint_number: usize,
+        checkpoint_updates: &CheckpointUpdates,
+        zk_service_state: &mut MinnowMTServiceState,
+        prev_proof: &ProofWithPublicInputs<F, C, D>,
+        base_case: bool,
+        verifier_data: &VerifierOnlyCircuitData<C, D>,
+    ) -> PartialWitness<F> {
+        debug!(
+            "apply_checkpoint_updates_and_set_witness: start ({})",
+            checkpoint_number
+        );
+        let mut pw = PartialWitness::new();
+        pw.set_bool_target(self.private_inputs.condition, !base_case)
+            .unwrap();
+        pw.set_proof_with_pis_target(
+            &self.private_inputs.inner_cyclic_proof_with_pis,
+            &prev_proof,
+        )
+        .unwrap();
+        pw.set_verifier_data_target(&self.private_inputs.verifier_data_target, verifier_data)
+            .unwrap();
+
+        for (i, update) in checkpoint_updates.iter().enumerate() {
+            zk_service_state.add_proof_targets(
+                &mut pw,
+                &self.private_inputs.prev_targets[i],
+                &update.id,
+            );
+            zk_service_state.update_leaf(&update);
+            zk_service_state.add_proof_targets(
+                &mut pw,
+                &self.private_inputs.new_targets[i],
+                &update.id,
+            );
+        }
+
+        debug!(
+            "apply_checkpoint_updates_and_set_witness: end ({})",
+            checkpoint_number
+        );
+        pw
+    }
 }
 
-// Returns the circuit along with the target wires needed to be set before proving
-pub fn build_circuit(
-    state_size: usize,
+fn build_circuit(
+    log_state_size: usize,
     num_checkpoint_updates: usize,
     degree_bits: Option<usize>,
-) -> MinnowMTCircuit {
-    let num_levels = state_size + 1;
+) -> MinnowMTOneStepCircuit {
+    let num_levels = log_state_size + 1;
     print_system_info(num_levels, num_checkpoint_updates);
 
     // Public inputs:
@@ -240,88 +275,85 @@ pub fn build_circuit(
     builder.print_gate_counts(0);
     debug!("================================================");
 
-    MinnowMTCircuit {
+    MinnowMTOneStepCircuit {
         circuit_data: builder.build::<C>(),
         private_inputs: all_targets,
     }
 }
 
-// Generates `CommonCircuitData` usable for recursion.
-pub fn common_data_for_recursion(
-    expected_degree_bits: usize,
-    num_public_inputs: usize,
-) -> CommonCircuitData<F, D> {
-    let config = CircuitConfig::standard_recursion_config();
-    let builder = CircuitBuilder::<F, D>::new(config);
-    let data = builder.build::<C>();
-
-    let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis(&data.common);
-    let verifier_data = builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
-    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
-    let data = builder.build::<C>();
-
-    let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    let proof = builder.add_virtual_proof_with_pis(&data.common);
-    let verifier_data = builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
-    builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
-
-    // Add noop gates until we reach the expected degree bits.
-    //  We end the loop when num_gates reaches (1 << (expected_degree_bits - 1)) + 1.
-    //  Padding takes care of the rest to ensure that the final gate count is 1 << expected_degree_bits.
-    while builder.num_gates() < 1 << (expected_degree_bits - 1) {
-        builder.add_gate(NoopGate, vec![]);
-    }
-
-    // Build the circuit
-    let mut common_data = builder.build::<C>().common;
-    assert_eq!(common_data.degree_bits(), expected_degree_bits);
-    common_data.num_public_inputs = num_public_inputs;
-    common_data
-}
-
-mod test {
-    use log::LevelFilter;
+#[cfg(test)]
+mod tests {
     use crate::utils::init_logging;
-    use super::*;
+    use log::LevelFilter;
 
-    #[test]
-    fn test_common_data_for_recursion_basic() {
+    use super::*;
+    use rstest::rstest;
+
+    fn build(state_size: usize, num_checkpoint_updates: usize, degree_bits: Option<usize>) {
         // init_logging(LevelFilter::Debug);
-        let expected_degree_bits = 14;
-        let num_public_inputs = 10;
-        let common_data = common_data_for_recursion(expected_degree_bits, num_public_inputs);
-        assert_eq!(common_data.degree_bits(), expected_degree_bits);
+        println!(
+            "state_size: {}, num_checkpoint_updates: {}, degree_bits: {:?}",
+            state_size, num_checkpoint_updates, degree_bits
+        );
+        let circuit = MinnowMTOneStepCircuit::new(state_size, num_checkpoint_updates, degree_bits);
+        assert_eq!(
+            circuit.circuit_data.common.degree_bits(),
+            degree_bits.unwrap()
+        );
     }
 
-    #[test]
-    fn test_common_data_for_recursion_full() {
-        let expected_degree_bits = 14;
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        let _verifier_data_target = builder.add_verifier_data_public_inputs();
-        let common_data = common_data_for_recursion(expected_degree_bits, builder.num_public_inputs());
-        assert_eq!(common_data.degree_bits(), expected_degree_bits);
+    #[rstest]
+    #[case(10, 350, 14)]
+    #[case(10, 900, 15)]
+    #[case(10, 2050, 16)]
+    #[case(10, 4300, 17)]
+    #[case(20, 200, 14)]
+    #[case(20, 500, 15)]
+    #[case(20, 1200, 16)]
+    #[case(20, 2550, 17)]
+    #[case(30, 100, 14)]
+    #[case(30, 350, 15)]
+    #[case(30, 850, 16)]
+    #[case(30, 1800, 17)]
+    fn test_limits_success(
+        #[case] state_size: usize,
+        #[case] num_checkpoint_updates: usize,
+        #[case] degree_bits: usize,
+    ) {
+        build(state_size, num_checkpoint_updates, Some(degree_bits));
+    }
 
-        let inner_cyclic_proof_with_pis = builder.add_virtual_proof_with_pis(&common_data);
-        let condition = builder.add_virtual_bool_target_safe();
-        builder.conditionally_verify_cyclic_proof_or_dummy::<C>(
-            condition,
-            &inner_cyclic_proof_with_pis,
-            &common_data,
-        )
-        .unwrap();
-
-        // Doing it twice just to reach the expected gate count.
-        builder.conditionally_verify_cyclic_proof_or_dummy::<C>(
-            condition,
-            &inner_cyclic_proof_with_pis,
-            &common_data,
-        )
-        .unwrap();
-        builder.print_gate_counts(0);
-        builder.build::<C>().common;
+    #[rstest]
+    #[should_panic]
+    #[case(10, 350, 14)]
+    #[should_panic]
+    #[case(10, 900, 15)]
+    #[should_panic]
+    #[case(10, 2050, 16)]
+    #[should_panic]
+    #[case(10, 4300, 17)]
+    #[should_panic]
+    #[case(20, 200, 14)]
+    #[should_panic]
+    #[case(20, 500, 15)]
+    #[should_panic]
+    #[case(20, 1200, 16)]
+    #[should_panic]
+    #[case(20, 2550, 17)]
+    #[should_panic]
+    #[case(30, 100, 14)]
+    #[should_panic]
+    #[case(30, 350, 15)]
+    #[should_panic]
+    #[case(30, 850, 16)]
+    #[should_panic]
+    #[case(30, 1800, 17)]
+    fn test_limits_failure(
+        #[case] state_size: usize,
+        #[case] num_checkpoint_updates: usize,
+        #[case] degree_bits: usize,
+    ) {
+        init_logging(LevelFilter::Debug);
+        build(state_size, num_checkpoint_updates + 50, Some(degree_bits));
     }
 }

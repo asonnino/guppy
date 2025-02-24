@@ -2,10 +2,11 @@ pub mod merkle;
 use log::trace;
 use merkle::{MerkleProof, MerkleProofTargets, MerkleTree};
 
-pub mod circuit;
-use circuit::{Digest, MyPartialWitness as PartialWitness, F, H};
+pub mod one_step_circuit;
+pub mod two_step_circuit;
 
 pub mod utils;
+use utils::{Digest, MyPartialWitness as PartialWitness, F, H};
 
 use plonky2::field::types::Field;
 use plonky2::plonk::config::Hasher;

@@ -7,7 +7,7 @@ use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
 use minnow_mt_plonky2::utils::{generate_sample_checkpoint_updates, init_logging};
 use minnow_mt_plonky2::{commit_single_update, CheckpointUpdates, StreamID};
-use minnow_mt_plonky2::circuit::{Digest, C, D, F};
+use minnow_mt_plonky2::one_step_circuit::{Digest, C, D, F};
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;

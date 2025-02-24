@@ -1,5 +1,5 @@
 use log::debug;
-use minnow_mt_plonky2::circuit::{common_data_for_recursion, Digest, C, D, F, H};
+use minnow_mt_plonky2::one_step_circuit::{common_data_for_recursion, Digest, C, D, F, H};
 use minnow_mt_plonky2::merkle::LeafTarget;
 use minnow_mt_plonky2::{StreamID, STREAM_VAL_LEN_F};
 use plonky2::hash::hash_types::HashOutTarget;

@@ -13,13 +13,11 @@ use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::config::Hasher;
 use plonky2::{field::types::Field, hash::hash_types::HashOutTarget};
 
-use crate::circuit::{
+use crate::utils::{
     Digest, InnerHasher, MyCircuitBuilder as CircuitBuilder, MyPartialWitness as PartialWitness, F,
     H,
 };
 use crate::{EncodedStreamPoint, StreamPoint, STREAM_POINT_LEN_F, STREAM_VAL_LEN_F};
-
-// const EMPTY_NODE: Digest = HashOut::<F>::ZERO;
 
 pub type MerkleLeaf = EncodedStreamPoint;
 
