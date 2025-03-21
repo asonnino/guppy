@@ -1,9 +1,9 @@
 use hashbrown::HashMap;
-use minnow_mt_plonky2::commit_single_update;
+use minnow_lib::commit_single_update;
+use minnow_lib::utils::generate_sample_checkpoint_updates;
+use minnow_lib::utils::init_logging;
+use minnow_lib::utils::{Digest, F};
 use minnow_mt_plonky2::one_step_circuit::MinnowMTOneStepCircuit;
-use minnow_mt_plonky2::utils::generate_sample_checkpoint_updates;
-use minnow_mt_plonky2::utils::init_logging;
-use minnow_mt_plonky2::utils::{Digest, F};
 use minnow_mt_plonky2::MinnowMTServiceState;
 use plonky2::field::types::Field;
 use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;

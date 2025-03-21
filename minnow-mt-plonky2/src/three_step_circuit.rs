@@ -1,15 +1,10 @@
 use log::info;
-use plonky2::field::types::Field;
 use plonky2::hash::hash_types::HashOutTarget;
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::target::Target;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::circuit_data::VerifierCircuitTarget;
-use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::with_context;
@@ -17,13 +12,8 @@ use plonky2::with_context;
 use crate::merkle::get_initial_root;
 use crate::two_step_circuit::{BaseCircuit, CyclicSequentialCircuit};
 
-use crate::merkle::add_merkle_proof_verification_to_circuit;
-use crate::merkle::MerkleProofTargets;
-use crate::utils::common_data_for_recursion;
-use crate::utils::print_system_info;
-use crate::utils::CircuitInfo;
-use crate::utils::Digest;
-use crate::utils::{C, D, F, H};
+use minnow_lib::utils::CircuitInfo;
+use minnow_lib::utils::{C, D, F};
 
 pub struct ThreeStepMinnowMTCircuits {
     pub base_circuit: BaseCircuit,
@@ -168,13 +158,6 @@ impl CompressedCircuit {
 }
 
 mod tests {
-    use std::time::Instant;
-
-    use crate::{
-        commit_single_update, utils::{generate_sample_checkpoint_updates, init_logging}, MinnowMTServiceState,
-    };
-
-    use super::*;
 
     #[test]
     fn test_compressed_circuit() {
@@ -207,7 +190,10 @@ mod tests {
         let combined_proof = compressed_circuit.circuit_data.prove(pw).unwrap();
         let end = Instant::now();
         info!("Proof generation time: {:?}", end.duration_since(start));
-        compressed_circuit.circuit_data.verify(combined_proof.clone()).unwrap();
+        compressed_circuit
+            .circuit_data
+            .verify(combined_proof.clone())
+            .unwrap();
         assert_eq!(
             combined_proof.public_inputs[0],
             base_proof_0.public_inputs[0]
@@ -240,7 +226,10 @@ mod tests {
         let num_checkpoint_updates = 500;
         let base_circuit = BaseCircuit::new(log_state_size, 1900);
         let compressed_circuit = CompressedCircuit::new(&base_circuit.circuit_data, 3);
-        println!("Compressed circuit info: {:?}", compressed_circuit.circuit_info);
+        println!(
+            "Compressed circuit info: {:?}",
+            compressed_circuit.circuit_info
+        );
     }
 
     #[test]
@@ -250,8 +239,12 @@ mod tests {
         let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
         println!("Base circuit info: {:?}", base_circuit.circuit_info);
         for branching_factor in [2, 3, 4, 5, 6, 7, 8, 9, 10] {
-            let compressed_circuit = CompressedCircuit::new(&base_circuit.circuit_data, branching_factor);
-            println!("Branching factor: {}, Compressed circuit info: {:?}", branching_factor, compressed_circuit.circuit_info);
+            let compressed_circuit =
+                CompressedCircuit::new(&base_circuit.circuit_data, branching_factor);
+            println!(
+                "Branching factor: {}, Compressed circuit info: {:?}",
+                branching_factor, compressed_circuit.circuit_info
+            );
         }
     }
 
@@ -259,11 +252,18 @@ mod tests {
     fn test_three_step_circuit() {
         let log_state_size = 30;
         let num_checkpoint_updates = 500;
-        let three_step_circuit = ThreeStepMinnowMTCircuits::new(
-            log_state_size, 50000, 1900
+        let three_step_circuit = ThreeStepMinnowMTCircuits::new(log_state_size, 50000, 1900);
+        println!(
+            "Three step circuit info: {:?}",
+            three_step_circuit.base_circuit.circuit_info
         );
-        println!("Three step circuit info: {:?}", three_step_circuit.base_circuit.circuit_info);
-        println!("Three step circuit info: {:?}", three_step_circuit.compressed_circuits[0].circuit_info);
-        println!("Three step circuit info: {:?}", three_step_circuit.sequential_circuit.circuit_info);
+        println!(
+            "Three step circuit info: {:?}",
+            three_step_circuit.compressed_circuits[0].circuit_info
+        );
+        println!(
+            "Three step circuit info: {:?}",
+            three_step_circuit.sequential_circuit.circuit_info
+        );
     }
 }

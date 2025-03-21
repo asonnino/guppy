@@ -16,11 +16,11 @@ use plonky2::with_context;
 use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::get_initial_root;
 use crate::merkle::MerkleProofTargets;
-use crate::utils::common_data_for_recursion;
-use crate::utils::print_system_info;
-use crate::utils::{Digest, C, D, F, H};
-use crate::CheckpointUpdates;
 use crate::MinnowMTServiceState;
+use minnow_lib::utils::common_data_for_recursion;
+use minnow_lib::utils::print_system_info;
+use minnow_lib::utils::{Digest, C, D, F, H};
+use minnow_lib::CheckpointUpdates;
 
 pub struct MinnowMTOneStepCircuit {
     pub circuit_data: CircuitData<F, C, D>,

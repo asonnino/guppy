@@ -8,18 +8,19 @@ use log::{info, trace, warn};
 use thiserror::Error;
 
 use plonky2::hash::merkle_proofs::MerkleProofTarget;
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::config::Hasher;
 use plonky2::{field::types::Field, hash::hash_types::HashOutTarget};
 
-use crate::utils::{
+use minnow_lib::utils::{
     Digest, InnerHasher, MyCircuitBuilder as CircuitBuilder, MyPartialWitness as PartialWitness, F,
     H,
 };
-use crate::{EncodedStreamPoint, StreamPoint, STREAM_POINT_LEN_F, STREAM_VAL_LEN_F};
+use minnow_lib::{EncodedStreamPoint, StreamPoint, StreamPointTarget, STREAM_POINT_LEN_F};
 
 pub type MerkleLeaf = EncodedStreamPoint;
+pub type LeafTarget = StreamPointTarget;
 
 pub const LEAF_LEN_F: usize = STREAM_POINT_LEN_F;
 
@@ -29,55 +30,6 @@ pub struct MerkleProofTargets {
     pub root_t: HashOutTarget,
     pub leaf_t: LeafTarget,
     pub index_t: Target,
-}
-
-// Mirrors the MerkleLeaf struct
-#[derive(Clone, Debug)]
-pub struct LeafTarget {
-    pub stream_id_t: Target,
-    pub stream_val_t: Vec<Target>,
-    pub new_flag_t: BoolTarget,
-}
-
-impl LeafTarget {
-    pub fn new(builder: &mut CircuitBuilder) -> Self {
-        Self {
-            stream_id_t: builder.add_virtual_target(),
-            stream_val_t: builder.add_virtual_targets(STREAM_VAL_LEN_F),
-            new_flag_t: builder.add_virtual_bool_target_safe(),
-        }
-    }
-
-    pub fn from_existing(
-        stream_id_t: Target,
-        stream_val_t: Vec<Target>,
-        new_flag_t: BoolTarget,
-    ) -> Self {
-        Self {
-            stream_id_t,
-            stream_val_t,
-            new_flag_t,
-        }
-    }
-
-    pub fn get_all_targets(&self) -> Vec<Target> {
-        let mut targets = vec![self.stream_id_t];
-        targets.extend(self.stream_val_t.iter().cloned());
-        targets.push(self.new_flag_t.target);
-        assert_eq!(targets.len(), LEAF_LEN_F);
-        targets
-    }
-
-    pub fn set_proof_targets(&self, pw: &mut PartialWitness, encoded_leaf_data: &MerkleLeaf) {
-        pw.set_target(self.stream_id_t, encoded_leaf_data.stream_id_f)
-            .unwrap();
-        for i in 0..encoded_leaf_data.stream_val_f.len() {
-            pw.set_target(self.stream_val_t[i], encoded_leaf_data.stream_val_f[i])
-                .unwrap();
-        }
-        pw.set_target(self.new_flag_t.target, encoded_leaf_data.new_flag_f)
-            .unwrap();
-    }
 }
 
 pub fn add_merkle_proof_verification_to_circuit(

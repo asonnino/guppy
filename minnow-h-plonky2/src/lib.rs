@@ -1,7 +1,7 @@
-use minnow_mt_plonky2::{
-    utils::{Digest, F, H}, CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN
+use minnow_lib::{
+    utils::{Digest, F, H},
+    CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN,
 };
-use plonky2::field::types::Field;
 use plonky2::plonk::config::Hasher;
 
 pub mod circuit;
@@ -64,7 +64,7 @@ impl MinnowHServiceState {
 
 #[cfg(test)]
 mod tests {
-    use minnow_mt_plonky2::STREAM_VAL_LEN;
+    use minnow_lib::STREAM_VAL_LEN;
 
     use super::*;
 

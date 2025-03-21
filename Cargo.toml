@@ -1,11 +1,7 @@
 [workspace]
 members = [
-    "minnow-lib",
-    "minnow-h-program",
-    "minnow-mt-program",
-    "script", 
     "minnow-mt-plonky2", 
-    "minnow-h-plonky2",
+    "minnow-h-plonky2", "minnow-lib",
 ]
 resolver = "2"
 

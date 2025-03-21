@@ -16,13 +16,13 @@ use plonky2::with_context;
 
 use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::MerkleProofTargets;
-use crate::utils::common_data_for_recursion;
-use crate::utils::print_system_info;
-use crate::utils::CircuitInfo;
-use crate::utils::Digest;
-use crate::utils::{C, D, F, H};
-use crate::CheckpointUpdates;
 use crate::MinnowMTServiceState;
+use minnow_lib::utils::common_data_for_recursion;
+use minnow_lib::utils::print_system_info;
+use minnow_lib::utils::CircuitInfo;
+use minnow_lib::utils::Digest;
+use minnow_lib::utils::{C, D, F, H};
+use minnow_lib::CheckpointUpdates;
 
 pub struct TwoStepMinnowMTCircuits {
     pub base_circuit: BaseCircuit,
@@ -422,14 +422,18 @@ mod tests {
             num_gates: 0,
             degree_bits: 0,
         };
-        for num_checkpoint_updates in (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step) {
+        for num_checkpoint_updates in
+            (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step)
+        {
             let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
             // let log_num_gates = (circuit.circuit_info.num_gates as f64).log2().ceil();
             let cur_info = circuit.circuit_info;
             if cur_info.degree_bits != prev_info.degree_bits {
                 println!(
                     "{} {} {}",
-                    num_checkpoint_updates - step, prev_info.num_gates, prev_info.degree_bits
+                    num_checkpoint_updates - step,
+                    prev_info.num_gates,
+                    prev_info.degree_bits
                 );
             }
             prev_info = cur_info;
@@ -449,7 +453,7 @@ mod tests {
         let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
         let cyclic_circuit =
             CyclicSequentialCircuit::new(&initial_root, &base_circuit.circuit_data);
-        
+
         info!("Base circuit: {:?}", base_circuit.circuit_info);
         info!("Cyclic circuit: {:?}", cyclic_circuit.circuit_info);
 

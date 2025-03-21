@@ -1,21 +1,15 @@
 use log::debug;
-use minnow_mt_plonky2::utils::{common_data_for_recursion, Digest, C, D, F, H};
-use minnow_mt_plonky2::merkle::LeafTarget;
-use minnow_mt_plonky2::{StreamID, STREAM_VAL_LEN_F};
+use minnow_lib::utils::{common_data_for_recursion, Digest, C, D, F, H};
+use minnow_lib::{StreamID, StreamPointTarget, STREAM_VAL_LEN_F};
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitTarget};
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::util::log2_ceil;
 use plonky2::with_context;
 
 use crate::MinnowHServiceState;
-
-// We do not need the new flag in the StreamPointTarget for the sparse node use cases.
-// Reusing what's existing for simplicity. We just set it to false in the service's state.
-pub type StreamPointTarget = LeafTarget;
 
 pub struct StreamPointVecTarget {
     pub targets: Vec<StreamPointTarget>,

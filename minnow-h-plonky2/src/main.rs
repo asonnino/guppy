@@ -1,20 +1,20 @@
-use log::LevelFilter;
-use log::{debug, info};
-use hashbrown::HashMap;
 use clap::Parser;
+use hashbrown::HashMap;
+use log::LevelFilter;
+use log::info;
 
 use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
-use minnow_mt_plonky2::utils::{generate_sample_checkpoint_updates, init_logging};
-use minnow_mt_plonky2::{commit_single_update, CheckpointUpdates, StreamID};
-use minnow_mt_plonky2::utils::{Digest, C, D, F};
+use minnow_lib::utils::{generate_sample_checkpoint_updates, init_logging};
+use minnow_lib::utils::{Digest, C, D, F};
+use minnow_lib::{commit_single_update, CheckpointUpdates, StreamID};
+use plonky2::field::types::Field;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
 use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
 use plonky2::recursion::dummy_circuit::cyclic_base_proof;
-use plonky2::field::types::Field;
 
 use std::time::Instant;
 
@@ -60,13 +60,22 @@ fn set_witness(
     pw.set_verifier_data_target(&all_targets.verifier_data_target, verifier_data)
         .unwrap();
 
-    assert_eq!(checkpoint_updates.len(), all_targets.checkpoint_update_targets.len());
-    for (update, target) in checkpoint_updates.iter().zip(all_targets.checkpoint_update_targets.iter()) {
+    assert_eq!(
+        checkpoint_updates.len(),
+        all_targets.checkpoint_update_targets.len()
+    );
+    for (update, target) in checkpoint_updates
+        .iter()
+        .zip(all_targets.checkpoint_update_targets.iter())
+    {
         target.set_proof_targets(&mut pw, &update.encode());
     }
 
     assert_eq!(zk_service_state.len(), all_targets.in_state_targets.len());
-    for (stream_point, target) in zk_service_state.iter().zip(all_targets.in_state_targets.iter()) {
+    for (stream_point, target) in zk_service_state
+        .iter()
+        .zip(all_targets.in_state_targets.iter())
+    {
         target.set_proof_targets(&mut pw, &stream_point.encode());
     }
 
@@ -92,12 +101,10 @@ fn main() {
         build_circuit(num_checkpoint_updates, &tracking_streams, degree_bits);
     let verifier_data = &cyclic_circuit_data.verifier_only;
     let common_data = &cyclic_circuit_data.common;
-    
+
     let num_checkpoints = 10;
-    let all_checkpoint_updates = generate_sample_checkpoint_updates(
-        num_checkpoints, 
-        num_checkpoint_updates
-    );
+    let all_checkpoint_updates =
+        generate_sample_checkpoint_updates(num_checkpoints, num_checkpoint_updates);
 
     let mut state = MinnowHServiceState::new(&tracking_streams);
     let mut prev_head = Digest::ZERO;
@@ -105,13 +112,13 @@ fn main() {
     for c in 0..num_checkpoints {
         let checkpoint_updates = &all_checkpoint_updates[c];
         let pw = set_witness(
-            c, 
-            &checkpoint_updates, 
-            &state, 
-            &all_targets, 
-            &proof, 
-            c == 0, 
-            &verifier_data
+            c,
+            &checkpoint_updates,
+            &state,
+            &all_targets,
+            &proof,
+            c == 0,
+            &verifier_data,
         );
 
         let start = Instant::now();

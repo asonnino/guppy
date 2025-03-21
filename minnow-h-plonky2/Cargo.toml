@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 clap.workspace = true
 plonky2.workspace = true
-minnow-mt-plonky2.workspace = true
+minnow-lib.workspace = true
 log.workspace = true
 hashbrown.workspace = true
