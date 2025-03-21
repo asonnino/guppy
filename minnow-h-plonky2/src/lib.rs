@@ -1,5 +1,5 @@
 use minnow_mt_plonky2::{
-    one_step_circuit::{Digest, F, H}, CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN
+    utils::{Digest, F, H}, CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN
 };
 use plonky2::field::types::Field;
 use plonky2::plonk::config::Hasher;

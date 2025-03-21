@@ -10,6 +10,12 @@ use log::info;
 
 use crate::{CheckpointUpdates, StreamPoint};
 
+#[derive(Debug)]
+pub struct CircuitInfo {
+    pub num_gates: usize,
+    pub degree_bits: usize,
+}
+
 pub fn init_logging(level: log::LevelFilter) {
     // Initialize logging
     let mut builder = env_logger::Builder::from_default_env();

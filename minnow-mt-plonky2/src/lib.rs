@@ -3,6 +3,7 @@ use log::trace;
 use merkle::{MerkleProof, MerkleProofTargets, MerkleTree};
 
 pub mod one_step_circuit;
+pub mod three_step_circuit;
 pub mod two_step_circuit;
 
 pub mod utils;
@@ -99,6 +100,8 @@ pub fn commit_single_update(updates: &CheckpointUpdates, prev_head: &Digest) -> 
     for stream_point in updates {
         checkpoint_commitment_inputs.extend(stream_point.encode().to_arr());
     }
+
+    // TODO: Should we use hash_or_noop or hash_pad here?
     let checkpoint_commitment = H::hash_or_noop(checkpoint_commitment_inputs.as_slice());
     let f = [prev_head.elements, checkpoint_commitment.elements].concat();
     H::hash_or_noop(&f)

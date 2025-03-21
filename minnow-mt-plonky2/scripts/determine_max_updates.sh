@@ -16,7 +16,7 @@ find_min_degree_bits() {
     
     num_failures=0
     while true; do
-        cargo run --release -- -s $num_levels -c $num_checkpoint_updates -g $estimate_degree_bits -b > /dev/null 2>&1
+        cargo run --release -- -l $num_levels -c $num_checkpoint_updates -g $estimate_degree_bits -b > /dev/null 2>&1
 
         if [ $? -eq 0 ]; then
             break

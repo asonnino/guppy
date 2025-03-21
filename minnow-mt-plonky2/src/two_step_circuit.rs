@@ -18,6 +18,7 @@ use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::MerkleProofTargets;
 use crate::utils::common_data_for_recursion;
 use crate::utils::print_system_info;
+use crate::utils::CircuitInfo;
 use crate::utils::Digest;
 use crate::utils::{C, D, F, H};
 use crate::CheckpointUpdates;
@@ -41,7 +42,7 @@ pub struct BaseOutputs {
 }
 
 pub struct BaseCircuit {
-    pub num_gates: usize,
+    pub circuit_info: CircuitInfo,
     pub circuit_data: CircuitData<F, C, D>,
     pub inputs: BaseInputs,
     pub outputs: BaseOutputs,
@@ -61,9 +62,9 @@ impl BaseCircuit {
      * (i) prev_targets,
      * (ii) new_targets
      */
-    pub fn new(state_size: usize, num_checkpoint_updates: usize) -> Self {
+    pub fn new(log_state_size: usize, num_checkpoint_updates: usize) -> Self {
         info!("Building base circuit");
-        let num_levels = state_size + 1;
+        let num_levels = log_state_size + 1;
         print_system_info(num_levels, num_checkpoint_updates);
 
         let config = CircuitConfig::standard_recursion_config();
@@ -167,8 +168,12 @@ impl BaseCircuit {
         let num_gates = builder.num_gates();
         info!("Base circuit built: {} gates", num_gates);
         let circuit_data = builder.build::<C>();
+        let degree_bits = circuit_data.common.degree_bits();
         BaseCircuit {
-            num_gates,
+            circuit_info: CircuitInfo {
+                num_gates,
+                degree_bits,
+            },
             circuit_data,
             inputs,
             outputs,
@@ -209,6 +214,7 @@ pub struct CyclicCircuitTargets {
 }
 
 pub struct CyclicSequentialCircuit {
+    pub circuit_info: CircuitInfo,
     pub circuit_data: CircuitData<F, C, D>,
     pub targets: CyclicCircuitTargets,
 }
@@ -306,17 +312,24 @@ impl CyclicSequentialCircuit {
         };
         builder.connect_hashes(base_in_checkpoint_head, actual_head);
 
-        let all_targets = CyclicCircuitTargets {
+        let targets = CyclicCircuitTargets {
             condition,
             base_proof: base_proof_with_pis,
             last_proof: inner_cyclic_proof_with_pis,
             verifier_data: verifier_data_target,
         };
         // builder.print_gate_counts(0);
-        info!("Cyclic circuit built: {} gates", builder.num_gates());
+        let num_gates = builder.num_gates();
+        info!("Cyclic circuit built: {} gates", num_gates);
+        let circuit_data = builder.build::<C>();
+        let degree_bits = circuit_data.common.degree_bits();
         CyclicSequentialCircuit {
-            circuit_data: builder.build::<C>(),
-            targets: all_targets,
+            circuit_info: CircuitInfo {
+                num_gates,
+                degree_bits,
+            },
+            circuit_data,
+            targets,
         }
     }
 
@@ -360,10 +373,11 @@ mod tests {
     #[test]
     fn base_circuit_test() {
         // init_logging(log::LevelFilter::Info);
-        let log_state_size = 10;
-        let num_checkpoint_updates = 300;
-        let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
+        let log_state_size = 30;
+        let num_checkpoint_updates = 225;
         let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+        println!("{:?}", circuit.circuit_info);
+        let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
         let all_checkpoint_updates = generate_sample_checkpoint_updates(1, num_checkpoint_updates);
         let old_head = Digest::ZERO;
         let old_num_leaves = zk_service_state.get_num_leaves();
@@ -377,10 +391,7 @@ mod tests {
         let start = Instant::now();
         let proof = circuit.circuit_data.prove(pw).unwrap();
         let end = Instant::now();
-        info!(
-            "Proof generation time: {:?}",
-            end.duration_since(start)
-        );
+        info!("Proof generation time: {:?}", end.duration_since(start));
 
         circuit.circuit_data.verify(proof.clone()).unwrap();
         assert_eq!(
@@ -404,11 +415,24 @@ mod tests {
     #[test]
     fn base_circuit_benchmark() {
         let log_state_size = 30;
-        let test_cases = [100, 200, 400, 800, 1600];
-        for num_checkpoint_updates in test_cases {
+        let start_num_checkpoint_updates = 50;
+        let step = 50;
+        let end_num_checkpoint_updates = 2000;
+        let mut prev_info = CircuitInfo {
+            num_gates: 0,
+            degree_bits: 0,
+        };
+        for num_checkpoint_updates in (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step) {
             let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
-            let log_num_gates = (circuit.num_gates as f64).log2().ceil();
-            println!("{} {} {}", num_checkpoint_updates, circuit.num_gates, log_num_gates);
+            // let log_num_gates = (circuit.circuit_info.num_gates as f64).log2().ceil();
+            let cur_info = circuit.circuit_info;
+            if cur_info.degree_bits != prev_info.degree_bits {
+                println!(
+                    "{} {} {}",
+                    num_checkpoint_updates - step, prev_info.num_gates, prev_info.degree_bits
+                );
+            }
+            prev_info = cur_info;
         }
     }
 
@@ -425,6 +449,9 @@ mod tests {
         let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
         let cyclic_circuit =
             CyclicSequentialCircuit::new(&initial_root, &base_circuit.circuit_data);
+        
+        info!("Base circuit: {:?}", base_circuit.circuit_info);
+        info!("Cyclic circuit: {:?}", cyclic_circuit.circuit_info);
 
         let mut cur_head = Digest::ZERO;
         let mut base_proofs = vec![];
