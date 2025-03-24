@@ -13,10 +13,10 @@ use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::util::log2_ceil;
 use plonky2::with_context;
 
-use crate::merkle::add_merkle_proof_verification_to_circuit;
-use crate::merkle::get_initial_root;
-use crate::merkle::MerkleProofTargets;
-use crate::MinnowMTServiceState;
+use minnow_lib::merkle::add_merkle_proof_verification_to_circuit;
+use minnow_lib::merkle::get_initial_root;
+use minnow_lib::merkle::MerkleProofTargets;
+use minnow_lib::MinnowMTServiceState;
 use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::{Digest, C, D, F, H};

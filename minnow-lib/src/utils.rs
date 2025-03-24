@@ -8,6 +8,9 @@ use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
 use log::info;
 
+use crate::usize_to_stream_id;
+use crate::STREAM_ID_LEN;
+use crate::STREAM_VAL_LEN;
 use crate::{CheckpointUpdates, StreamPoint};
 
 #[derive(Debug)]
@@ -46,25 +49,24 @@ pub fn generate_sample_checkpoint_updates(
     let first_set = (0..num_checkpoint_updates)
         .map(|i| {
             StreamPoint::new_with_flag(
-                i.try_into().unwrap(),
-                [start_checkpoint_number as u8; 32],
+                usize_to_stream_id(i),
+                [start_checkpoint_number as u8; STREAM_VAL_LEN],
                 true,
             )
         })
-        .collect();
-    all_updates.push(first_set);
+        .collect::<Vec<StreamPoint>>();
+    all_updates.push(CheckpointUpdates::from_iter(first_set.into_iter()));
     for _ in 1..num_checkpoints {
-        all_updates.push(
-            (0..num_checkpoint_updates)
-                .map(|i| {
-                    StreamPoint::new_with_flag(
-                        i.try_into().unwrap(),
-                        [(start_checkpoint_number + i) as u8; 32],
-                        false,
-                    )
-                })
-                .collect(),
-        );
+        let points = (0..num_checkpoint_updates)
+            .map(|i| {
+                StreamPoint::new_with_flag(
+                    usize_to_stream_id(i),
+                    [(start_checkpoint_number + i) as u8; STREAM_VAL_LEN],
+                    false,
+                )
+            })
+            .collect::<Vec<StreamPoint>>();
+        all_updates.push(CheckpointUpdates::from_iter(points.into_iter()));
     }
     all_updates
 }
@@ -116,7 +118,7 @@ pub fn common_data_for_recursion(
 }
 
 mod test {
-
+    use super::*;
     #[test]
     fn test_common_data_for_recursion_basic() {
         // init_logging(LevelFilter::Debug);

@@ -64,7 +64,7 @@ impl MinnowHServiceState {
 
 #[cfg(test)]
 mod tests {
-    use minnow_lib::STREAM_VAL_LEN;
+    use minnow_lib::{usize_to_stream_id, STREAM_VAL_LEN};
 
     use super::*;
 
@@ -73,7 +73,7 @@ mod tests {
         let num_tracking_streams = 10;
         let state = MinnowHServiceState {
             stream_points: (0..num_tracking_streams)
-                .map(|id| StreamPoint::new(id as StreamID, [0; STREAM_VAL_LEN]))
+                .map(|id| StreamPoint::new(usize_to_stream_id(id), [0; STREAM_VAL_LEN]))
                 .collect(),
         };
         let commitment = state.commit();

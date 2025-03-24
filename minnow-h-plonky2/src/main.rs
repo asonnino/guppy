@@ -5,8 +5,10 @@ use log::info;
 
 use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
+use minnow_lib::usize_to_stream_id;
 use minnow_lib::utils::{generate_sample_checkpoint_updates, init_logging};
 use minnow_lib::utils::{Digest, C, D, F};
+use minnow_lib::STREAM_ID_LEN;
 use minnow_lib::{commit_single_update, CheckpointUpdates, StreamID};
 use plonky2::field::types::Field;
 use plonky2::iop::witness::PartialWitness;
@@ -96,7 +98,7 @@ fn main() {
     let degree_bits = args.degree_bits;
     let num_tracking_streams = args.state_size;
     let tracking_streams: Vec<StreamID> =
-        (0..num_tracking_streams).map(|i| i as StreamID).collect();
+        (0..num_tracking_streams).map(|i| usize_to_stream_id(i)).collect();
     let (cyclic_circuit_data, all_targets) =
         build_circuit(num_checkpoint_updates, &tracking_streams, degree_bits);
     let verifier_data = &cyclic_circuit_data.verifier_only;

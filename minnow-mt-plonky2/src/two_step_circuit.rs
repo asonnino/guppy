@@ -14,9 +14,10 @@ use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::with_context;
 
-use crate::merkle::add_merkle_proof_verification_to_circuit;
-use crate::merkle::MerkleProofTargets;
 use crate::MinnowMTServiceState;
+
+use minnow_lib::merkle::add_merkle_proof_verification_to_circuit;
+use minnow_lib::merkle::MerkleProofTargets;
 use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;

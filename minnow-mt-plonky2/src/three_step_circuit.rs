@@ -9,9 +9,9 @@ use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::with_context;
 
-use crate::merkle::get_initial_root;
 use crate::two_step_circuit::{BaseCircuit, CyclicSequentialCircuit};
 
+use minnow_lib::merkle::get_initial_root;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::{C, D, F};
 
