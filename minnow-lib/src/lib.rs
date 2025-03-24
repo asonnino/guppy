@@ -168,17 +168,6 @@ impl CheckpointUpdates {
     }
 }
 
-pub fn commit_single_update(updates: &CheckpointUpdates, prev_head: &Digest) -> Digest {
-    let mut checkpoint_commitment_inputs = Vec::new();
-    for stream_point in updates.iter() {
-        checkpoint_commitment_inputs.extend(stream_point.encode().to_arr());
-    }
-
-    let checkpoint_commitment = H::hash_or_noop(checkpoint_commitment_inputs.as_slice());
-    let f = [prev_head.elements, checkpoint_commitment.elements].concat();
-    H::hash_or_noop(&f)
-}
-
 #[derive(Clone, Debug)]
 pub struct StreamPointTarget {
     pub stream_id_t: Vec<Target>,
@@ -232,6 +221,36 @@ impl StreamPointTarget {
         }
         pw.set_target(self.new_flag_t.target, encoded_leaf_data.new_flag_f)
             .unwrap();
+    }
+}
+
+pub struct StreamPointVecTarget {
+    pub targets: Vec<StreamPointTarget>,
+}
+
+impl StreamPointVecTarget {
+    pub fn new(builder: &mut CircuitBuilder, num_streams: usize) -> Self {
+        let mut targets = vec![];
+        for _ in 0..num_streams {
+            targets.push(StreamPointTarget::new(builder));
+        }
+        Self { targets }
+    }
+
+    pub fn get_all_targets(&self) -> Vec<Target> {
+        self.targets
+            .iter()
+            .map(|t| t.get_all_targets())
+            .flatten()
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.targets.len()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<StreamPointTarget> {
+        self.targets.iter()
     }
 }
 

@@ -1,6 +1,7 @@
 use log::{debug, info};
+use minnow_lib::checkpoint_commitment::{CommitmentStrategy, HashCommitment, MerkleCommitment};
 use minnow_lib::utils::{common_data_for_recursion, Digest, MyCircuitBuilder, C, D, F, H};
-use minnow_lib::{StreamID, StreamPointTarget, STREAM_VAL_LEN_F};
+use minnow_lib::{StreamID, StreamPointTarget, StreamPointVecTarget, STREAM_VAL_LEN_F};
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -11,52 +12,11 @@ use plonky2::with_context;
 
 use crate::MinnowHServiceState;
 
-// Returns true only if all elements of vec1 are equal to the corresponding elements of vec2
-fn is_equal_vec(builder: &mut MyCircuitBuilder, vec1: &[Target], vec2: &[Target]) -> BoolTarget {
-    assert_eq!(vec1.len(), vec2.len(), "Vectors must have the same length");
-    let mut result = builder._true();
-    for (a, b) in vec1.iter().zip(vec2.iter()) {
-        let equal = builder.is_equal(*a, *b);
-        result = builder.and(result, equal);
-    }
-    result
-}
-
-pub struct StreamPointVecTarget {
-    pub targets: Vec<StreamPointTarget>,
-}
-
-impl StreamPointVecTarget {
-    pub fn new(builder: &mut CircuitBuilder<F, D>, num_streams: usize) -> Self {
-        let mut targets = vec![];
-        for _ in 0..num_streams {
-            targets.push(StreamPointTarget::new(builder));
-        }
-        Self { targets }
-    }
-
-    pub fn get_all_targets(&self) -> Vec<Target> {
-        self.targets
-            .iter()
-            .map(|t| t.get_all_targets())
-            .flatten()
-            .collect()
-    }
-
-    pub fn len(&self) -> usize {
-        self.targets.len()
-    }
-
-    pub fn iter(&self) -> std::slice::Iter<StreamPointTarget> {
-        self.targets.iter()
-    }
-}
-
-pub struct AllTargets {
+pub struct AllTargets<S: CommitmentStrategy> {
     pub condition: BoolTarget,
     pub inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
     pub verifier_data_target: VerifierCircuitTarget,
-    pub checkpoint_update_targets: StreamPointVecTarget,
+    pub checkpoint_update_targets: S::CheckpointUpdatesTargets,
     pub in_state_targets: StreamPointVecTarget,
 }
 
@@ -70,12 +30,16 @@ fn estimate_degree_bits(num_checkpoint_updates: usize, num_tracking_streams: usi
     return log2_ceil(num_gates);
 }
 
-pub fn build_circuit(
+pub fn build_circuit<S: CommitmentStrategy>(
     num_checkpoint_updates: usize,
     tracking_streams: &[StreamID],
     degree_bits: Option<usize>,
-) -> (CircuitData<F, C, D>, AllTargets) {
-    info!("Building circuit processing {} checkpoint updates w/ {} tracking streams", num_checkpoint_updates, tracking_streams.len());
+) -> (CircuitData<F, C, D>, AllTargets<S>) {
+    info!(
+        "Building circuit processing {} checkpoint updates w/ {} tracking streams",
+        num_checkpoint_updates,
+        tracking_streams.len()
+    );
     let num_tracking_streams = tracking_streams.len();
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -90,12 +54,13 @@ pub fn build_circuit(
     // (ii) current state vector
     // (iii) condition
 
-    let checkpoint_update_t = StreamPointVecTarget::new(&mut builder, num_checkpoint_updates);
+    let checkpoint_update_t = S::init_targets(&mut builder, num_checkpoint_updates);
+
+    // let checkpoint_update_t = StreamPointVecTarget::new(&mut builder, num_checkpoint_updates);
     let cur_checkpoint_head_pi = builder.add_virtual_hash_public_input();
     let checkpoint_commitment: HashOutTarget;
     with_context!(builder, "hash checkpoint commitment", {
-        let x = checkpoint_update_t.get_all_targets();
-        checkpoint_commitment = builder.hash_or_noop::<H>(x);
+        checkpoint_commitment = S::commit_t(&mut builder, &checkpoint_update_t);
     });
 
     let in_state_t = StreamPointVecTarget::new(&mut builder, num_tracking_streams);
@@ -106,25 +71,7 @@ pub fn build_circuit(
 
     let mut out_state_t = StreamPointVecTarget::new(&mut builder, 0);
     with_context!(builder, "process checkpoint updates", {
-        for x in &in_state_t.targets {
-            let stream_id_t = &x.stream_id_t;
-            let mut cur_val_t = x.stream_val_t.clone();
-
-            for y in &checkpoint_update_t.targets {
-                let update_id_t = &y.stream_id_t;
-                let new_val_t = &y.stream_val_t;
-
-                let b = is_equal_vec(&mut builder, &stream_id_t, &update_id_t);
-                for i in 0..STREAM_VAL_LEN_F {
-                    cur_val_t[i] = builder.select(b, new_val_t[i], cur_val_t[i]);
-                }
-            }
-            out_state_t.targets.push(StreamPointTarget::from_existing(
-                stream_id_t.clone(),
-                cur_val_t.to_vec(),
-                builder._false(),
-            ));
-        }
+        out_state_t = S::update_state(&mut builder, &in_state_t, &checkpoint_update_t);
     });
 
     // Register the final service state's commitment as a public input

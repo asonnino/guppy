@@ -1,4 +1,6 @@
 use plonky2::gates::noop::NoopGate;
+use plonky2::iop::target::BoolTarget;
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
@@ -115,6 +117,17 @@ pub fn common_data_for_recursion(
     assert_eq!(common_data.degree_bits(), expected_degree_bits);
     common_data.num_public_inputs = num_public_inputs;
     common_data
+}
+
+// Returns true only if all elements of vec1 are equal to the corresponding elements of vec2
+pub fn is_equal_vec(builder: &mut MyCircuitBuilder, vec1: &[Target], vec2: &[Target]) -> BoolTarget {
+    assert_eq!(vec1.len(), vec2.len(), "Vectors must have the same length");
+    let mut result = builder._true();
+    for (a, b) in vec1.iter().zip(vec2.iter()) {
+        let equal = builder.is_equal(*a, *b);
+        result = builder.and(result, equal);
+    }
+    result
 }
 
 mod test {

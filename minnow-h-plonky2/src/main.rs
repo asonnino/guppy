@@ -4,7 +4,10 @@ use log::LevelFilter;
 use log::info;
 
 use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
+use minnow_h_plonky2::MinnowH;
 use minnow_h_plonky2::MinnowHServiceState;
+use minnow_lib::checkpoint_commitment::CommitmentStrategy;
+use minnow_lib::checkpoint_commitment::HashCommitment;
 use minnow_lib::usize_to_stream_id;
 use minnow_lib::utils::{generate_sample_checkpoint_updates, init_logging};
 use minnow_lib::utils::{Digest, C, D, F};
@@ -41,11 +44,11 @@ struct Args {
     debug: bool,
 }
 
-fn set_witness(
+fn set_witness<S: CommitmentStrategy>(
     checkpoint_number: usize,
-    checkpoint_updates: &CheckpointUpdates,
+    validator_state: &S::ValidatorState,
     zk_service_state: &MinnowHServiceState,
-    all_targets: &AllTargets,
+    all_targets: &AllTargets<S>,
     prev_proof: &ProofWithPublicInputs<F, C, D>,
     base_case: bool,
     verifier_data: &VerifierOnlyCircuitData<C, D>,
@@ -62,16 +65,7 @@ fn set_witness(
     pw.set_verifier_data_target(&all_targets.verifier_data_target, verifier_data)
         .unwrap();
 
-    assert_eq!(
-        checkpoint_updates.len(),
-        all_targets.checkpoint_update_targets.len()
-    );
-    for (update, target) in checkpoint_updates
-        .iter()
-        .zip(all_targets.checkpoint_update_targets.iter())
-    {
-        target.set_proof_targets(&mut pw, &update.encode());
-    }
+    S::assign_targets(&all_targets.checkpoint_update_targets, validator_state, &mut pw);
 
     assert_eq!(zk_service_state.len(), all_targets.in_state_targets.len());
     for (stream_point, target) in zk_service_state
@@ -99,8 +93,11 @@ fn main() {
     let num_tracking_streams = args.state_size;
     let tracking_streams: Vec<StreamID> =
         (0..num_tracking_streams).map(|i| usize_to_stream_id(i)).collect();
+
+    let minnow_h = MinnowH::<HashCommitment>::new();
+
     let (cyclic_circuit_data, all_targets) =
-        build_circuit(num_checkpoint_updates, &tracking_streams, degree_bits);
+        build_circuit::<HashCommitment>(num_checkpoint_updates, &tracking_streams, degree_bits);
     let verifier_data = &cyclic_circuit_data.verifier_only;
     let common_data = &cyclic_circuit_data.common;
 
@@ -113,9 +110,11 @@ fn main() {
     let mut proof = cyclic_base_proof(&common_data, verifier_data, HashMap::<usize, F>::new());
     for c in 0..num_checkpoints {
         let checkpoint_updates = &all_checkpoint_updates[c];
+        let validator_state = HashCommitment::init_validator_state(checkpoint_updates);
+
         let pw = set_witness(
             c,
-            &checkpoint_updates,
+            &validator_state,
             &state,
             &all_targets,
             &proof,
@@ -136,7 +135,7 @@ fn main() {
         cyclic_circuit_data.verify(proof.clone()).unwrap();
 
         // Tests
-        let new_head = commit_single_update(&checkpoint_updates, &prev_head);
+        let new_head = minnow_h.commit(&checkpoint_updates, &prev_head, num_checkpoint_updates);
         assert_eq!(new_head.elements, proof.public_inputs[0..4]);
 
         state.apply_checkpoint_updates(&checkpoint_updates);

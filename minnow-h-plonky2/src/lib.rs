@@ -1,10 +1,27 @@
+use circuit::build_circuit;
 use minnow_lib::{
-    utils::{Digest, F, H},
-    CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN,
+    checkpoint_commitment::CommitmentStrategy, utils::{Digest, F, H}, CheckpointUpdates, StreamID, StreamPoint, STREAM_VAL_LEN
 };
 use plonky2::plonk::config::Hasher;
+use std::marker::PhantomData;
 
 pub mod circuit;
+
+pub struct MinnowH<S: CommitmentStrategy> {
+    _phantom: PhantomData<S>,
+}
+
+impl<S: CommitmentStrategy> MinnowH<S> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn commit(&self, updates: &CheckpointUpdates, prev_head: &Digest, batch_size: usize) -> Digest {
+        S::commit(updates, prev_head, batch_size)
+    }
+}
 
 pub struct MinnowHServiceState {
     pub stream_points: Vec<StreamPoint>,
@@ -65,6 +82,7 @@ impl MinnowHServiceState {
 #[cfg(test)]
 mod tests {
     use minnow_lib::{usize_to_stream_id, STREAM_VAL_LEN};
+    use plonky2::field::types::Field;
 
     use super::*;
 
@@ -79,7 +97,7 @@ mod tests {
         let commitment = state.commit();
         assert_eq!(
             commitment.elements[0],
-            F::from_canonical_u64(6109254219606511396)
+            F::from_canonical_u64(3852875782797252487)
         );
     }
 }
