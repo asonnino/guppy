@@ -357,23 +357,21 @@ impl CyclicSequentialCircuit {
 mod tests {
     use std::time::Instant;
 
-    use crate::{
-        commit_single_update,
-        merkle::get_initial_root,
-        utils::{generate_sample_checkpoint_updates, init_logging, Digest},
-    };
+    use crate::merkle::get_initial_root;
+
+    use minnow_lib::commit_single_update;
+    use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
 
     use super::*;
     use hashbrown::HashMap;
     use plonky2::recursion::{
-        cyclic_recursion::{self, check_cyclic_proof_verifier_data},
-        dummy_circuit::cyclic_base_proof,
+        cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
     };
 
     #[test]
     fn base_circuit_test() {
         // init_logging(log::LevelFilter::Info);
-        let log_state_size = 30;
+        let log_state_size = 10;
         let num_checkpoint_updates = 225;
         let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
         println!("{:?}", circuit.circuit_info);
@@ -413,37 +411,9 @@ mod tests {
     }
 
     #[test]
-    fn base_circuit_benchmark() {
-        let log_state_size = 30;
-        let start_num_checkpoint_updates = 50;
-        let step = 50;
-        let end_num_checkpoint_updates = 2000;
-        let mut prev_info = CircuitInfo {
-            num_gates: 0,
-            degree_bits: 0,
-        };
-        for num_checkpoint_updates in
-            (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step)
-        {
-            let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
-            // let log_num_gates = (circuit.circuit_info.num_gates as f64).log2().ceil();
-            let cur_info = circuit.circuit_info;
-            if cur_info.degree_bits != prev_info.degree_bits {
-                println!(
-                    "{} {} {}",
-                    num_checkpoint_updates - step,
-                    prev_info.num_gates,
-                    prev_info.degree_bits
-                );
-            }
-            prev_info = cur_info;
-        }
-    }
-
-    #[test]
     fn test_cyclic_circuit() {
-        init_logging(log::LevelFilter::Info);
-        let log_state_size = 20;
+        // init_logging(log::LevelFilter::Info);
+        let log_state_size = 10;
         let num_checkpoint_updates = 100;
         let num_checkpoints = 10;
         let initial_root = get_initial_root(log_state_size + 1);

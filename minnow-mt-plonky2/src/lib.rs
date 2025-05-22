@@ -88,6 +88,8 @@ impl MinnowMTServiceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use minnow_lib::commit_single_update;
+    use minnow_lib::STREAM_VAL_LEN;
 
     #[test]
     fn test_commit_single_update() {

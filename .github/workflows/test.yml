@@ -1,0 +1,55 @@
+name: Minnow MT Plonky2 Tests
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'minnow-mt-plonky2/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'minnow-mt-plonky2/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: minnow-mt-plonky2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          # Use nightly as specified in rust-toolchain.toml
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            minnow-mt-plonky2/target
+          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('minnow-mt-plonky2/**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-nightly-
+
+      - name: Run tests
+        run: cargo test --release -- --test-threads=1
+

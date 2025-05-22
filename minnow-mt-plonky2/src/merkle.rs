@@ -377,7 +377,7 @@ pub fn get_initial_root(num_levels: usize) -> Digest {
 
 #[cfg(test)]
 mod test {
-    use crate::STREAM_VAL_LEN;
+    use minnow_lib::STREAM_VAL_LEN;
 
     use super::*;
 

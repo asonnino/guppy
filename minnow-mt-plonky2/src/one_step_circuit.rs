@@ -19,12 +19,13 @@ use crate::merkle::MerkleProofTargets;
 use crate::MinnowMTServiceState;
 use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
+use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::{Digest, C, D, F, H};
 use minnow_lib::CheckpointUpdates;
-
 pub struct MinnowMTOneStepCircuit {
     pub circuit_data: CircuitData<F, C, D>,
     pub private_inputs: PrivateInputs,
+    pub circuit_info: CircuitInfo,
 }
 
 pub struct PrivateInputs {
@@ -275,22 +276,26 @@ fn build_circuit(
     builder.print_gate_counts(0);
     debug!("================================================");
 
+    let num_gates = builder.num_gates();
+    let circuit_data = builder.build::<C>();
+    let degree_bits = circuit_data.common.degree_bits();
+
     MinnowMTOneStepCircuit {
-        circuit_data: builder.build::<C>(),
+        circuit_data,
         private_inputs: all_targets,
+        circuit_info: CircuitInfo {
+            num_gates,
+            degree_bits,
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::init_logging;
-    use log::LevelFilter;
-
     use super::*;
     use rstest::rstest;
 
     fn build(state_size: usize, num_checkpoint_updates: usize, degree_bits: Option<usize>) {
-        // init_logging(LevelFilter::Debug);
         println!(
             "state_size: {}, num_checkpoint_updates: {}, degree_bits: {:?}",
             state_size, num_checkpoint_updates, degree_bits
@@ -302,20 +307,11 @@ mod tests {
         );
     }
 
+    // Quick tests that run by default
     #[rstest]
     #[case(10, 350, 14)]
-    #[case(10, 900, 15)]
-    #[case(10, 2050, 16)]
-    #[case(10, 4300, 17)]
     #[case(20, 200, 14)]
-    #[case(20, 500, 15)]
-    #[case(20, 1200, 16)]
-    #[case(20, 2550, 17)]
-    #[case(30, 100, 14)]
-    #[case(30, 350, 15)]
-    #[case(30, 850, 16)]
-    #[case(30, 1800, 17)]
-    fn test_limits_success(
+    fn test_limits_success_quick(
         #[case] state_size: usize,
         #[case] num_checkpoint_updates: usize,
         #[case] degree_bits: usize,
@@ -323,37 +319,64 @@ mod tests {
         build(state_size, num_checkpoint_updates, Some(degree_bits));
     }
 
-    #[rstest]
-    #[should_panic]
-    #[case(10, 350, 14)]
-    #[should_panic]
-    #[case(10, 900, 15)]
-    #[should_panic]
-    #[case(10, 2050, 16)]
-    #[should_panic]
-    #[case(10, 4300, 17)]
-    #[should_panic]
-    #[case(20, 200, 14)]
-    #[should_panic]
-    #[case(20, 500, 15)]
-    #[should_panic]
-    #[case(20, 1200, 16)]
-    #[should_panic]
-    #[case(20, 2550, 17)]
-    #[should_panic]
-    #[case(30, 100, 14)]
-    #[should_panic]
-    #[case(30, 350, 15)]
-    #[should_panic]
-    #[case(30, 850, 16)]
-    #[should_panic]
-    #[case(30, 1800, 17)]
-    fn test_limits_failure(
-        #[case] state_size: usize,
-        #[case] num_checkpoint_updates: usize,
-        #[case] degree_bits: usize,
-    ) {
-        init_logging(LevelFilter::Debug);
-        build(state_size, num_checkpoint_updates + 50, Some(degree_bits));
+    // Comprehensive tests that only run when explicitly requested
+    #[cfg(feature = "comprehensive_tests")]
+    mod comprehensive {
+        use super::*;
+        use rstest::rstest;
+
+        #[rstest]
+        #[case(10, 350, 14)]
+        #[case(10, 900, 15)]
+        #[case(10, 2050, 16)]
+        #[case(10, 4300, 17)]
+        #[case(20, 200, 14)]
+        #[case(20, 500, 15)]
+        #[case(20, 1200, 16)]
+        #[case(20, 2550, 17)]
+        #[case(30, 100, 14)]
+        #[case(30, 350, 15)]
+        #[case(30, 850, 16)]
+        #[case(30, 1800, 17)]
+        fn test_limits_success(
+            #[case] state_size: usize,
+            #[case] num_checkpoint_updates: usize,
+            #[case] degree_bits: usize,
+        ) {
+            build(state_size, num_checkpoint_updates, Some(degree_bits));
+        }
+
+        #[rstest]
+        #[should_panic]
+        #[case(10, 350, 14)]
+        #[should_panic]
+        #[case(10, 900, 15)]
+        #[should_panic]
+        #[case(10, 2050, 16)]
+        #[should_panic]
+        #[case(10, 4300, 17)]
+        #[should_panic]
+        #[case(20, 200, 14)]
+        #[should_panic]
+        #[case(20, 500, 15)]
+        #[should_panic]
+        #[case(20, 1200, 16)]
+        #[should_panic]
+        #[case(20, 2550, 17)]
+        #[should_panic]
+        #[case(30, 100, 14)]
+        #[should_panic]
+        #[case(30, 350, 15)]
+        #[should_panic]
+        #[case(30, 850, 16)]
+        #[should_panic]
+        #[case(30, 1800, 17)]
+        fn test_limits_failure(
+            #[case] state_size: usize,
+            #[case] num_checkpoint_updates: usize,
+            #[case] degree_bits: usize,
+        ) {
+            build(state_size, num_checkpoint_updates + 50, Some(degree_bits));
+        }
     }
 }

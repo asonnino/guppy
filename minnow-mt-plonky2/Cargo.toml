@@ -2,6 +2,7 @@
 name = "minnow-mt-plonky2"
 version = "0.1.0"
 edition = "2021"
+default-run = "minnow-mt-plonky2"
 
 [dependencies]
 env_logger.workspace = true
@@ -15,3 +16,6 @@ minnow-lib.workspace = true
 
 [dev-dependencies]
 rstest = "0.18.2"
+
+[features]
+comprehensive_tests = []

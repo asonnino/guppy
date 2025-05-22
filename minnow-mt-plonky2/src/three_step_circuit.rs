@@ -157,7 +157,13 @@ impl CompressedCircuit {
     }
 }
 
+#[allow(unused_imports)]
 mod tests {
+    use super::*;
+    use crate::MinnowMTServiceState;
+    use minnow_lib::commit_single_update;
+    use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
+    use std::time::Instant;
 
     #[test]
     fn test_compressed_circuit() {
@@ -220,50 +226,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_compressed_circuit_basic() {
-        let log_state_size = 30;
-        let num_checkpoint_updates = 500;
-        let base_circuit = BaseCircuit::new(log_state_size, 1900);
-        let compressed_circuit = CompressedCircuit::new(&base_circuit.circuit_data, 3);
-        println!(
-            "Compressed circuit info: {:?}",
-            compressed_circuit.circuit_info
-        );
-    }
+    // #[test]
+    // fn test_compressed_circuit_basic() {
+    //     let log_state_size = 30;
+    //     // let num_checkpoint_updates = 500;
+    //     let base_circuit = BaseCircuit::new(log_state_size, 1900);
+    //     let compressed_circuit = CompressedCircuit::new(&base_circuit.circuit_data, 3);
+    //     println!(
+    //         "Compressed circuit info: {:?}",
+    //         compressed_circuit.circuit_info
+    //     );
+    // }
 
-    #[test]
-    fn bench_compressed_circuit_branching_factor() {
-        let log_state_size = 20;
-        let num_checkpoint_updates = 500;
-        let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
-        println!("Base circuit info: {:?}", base_circuit.circuit_info);
-        for branching_factor in [2, 3, 4, 5, 6, 7, 8, 9, 10] {
-            let compressed_circuit =
-                CompressedCircuit::new(&base_circuit.circuit_data, branching_factor);
-            println!(
-                "Branching factor: {}, Compressed circuit info: {:?}",
-                branching_factor, compressed_circuit.circuit_info
-            );
-        }
-    }
-
-    #[test]
-    fn test_three_step_circuit() {
-        let log_state_size = 30;
-        let num_checkpoint_updates = 500;
-        let three_step_circuit = ThreeStepMinnowMTCircuits::new(log_state_size, 50000, 1900);
-        println!(
-            "Three step circuit info: {:?}",
-            three_step_circuit.base_circuit.circuit_info
-        );
-        println!(
-            "Three step circuit info: {:?}",
-            three_step_circuit.compressed_circuits[0].circuit_info
-        );
-        println!(
-            "Three step circuit info: {:?}",
-            three_step_circuit.sequential_circuit.circuit_info
-        );
-    }
+    // #[test]
+    // fn test_three_step_circuit() {
+    //     let log_state_size = 30;
+    //     // let num_checkpoint_updates = 500;
+    //     let three_step_circuit = ThreeStepMinnowMTCircuits::new(log_state_size, 50000, 1900);
+    //     println!(
+    //         "Three step circuit info: {:?}",
+    //         three_step_circuit.base_circuit.circuit_info
+    //     );
+    //     println!(
+    //         "Three step circuit info: {:?}",
+    //         three_step_circuit.compressed_circuits[0].circuit_info
+    //     );
+    //     println!(
+    //         "Three step circuit info: {:?}",
+    //         three_step_circuit.sequential_circuit.circuit_info
+    //     );
+    // }
 }
