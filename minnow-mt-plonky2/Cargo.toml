@@ -16,6 +16,11 @@ minnow-lib.workspace = true
 
 [dev-dependencies]
 rstest = "0.18.2"
+criterion = "0.5"
+
+[[bench]]
+name = "proving"
+harness = false
 
 [features]
 comprehensive_tests = []
