@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use minnow_mt_plonky2::{two_step_circuit::BaseCircuit, MinnowMTServiceState};
 use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
+use minnow_mt_plonky2::{two_step_circuit::BaseCircuit, MinnowMTServiceState};
 use std::collections::HashMap;
 
 // The goal is to benchmark plonky2 proving times for different circuit sizes.
@@ -14,7 +14,10 @@ fn find_configs() -> Vec<(usize, (usize, usize, BaseCircuit))> {
         let circuit = BaseCircuit::new(log_state_sizes, num_checkpoint_updates);
         // Insert the config if it is not already in the map.
         if !configs.contains_key(&circuit.circuit_info.degree_bits) {
-            configs.insert(circuit.circuit_info.degree_bits, (log_state_sizes, num_checkpoint_updates, circuit));
+            configs.insert(
+                circuit.circuit_info.degree_bits,
+                (log_state_sizes, num_checkpoint_updates, circuit),
+            );
         }
     }
     // Ensure that there is at least one config for each degree bit from 12 to 15.
@@ -32,7 +35,10 @@ fn find_configs() -> Vec<(usize, (usize, usize, BaseCircuit))> {
 fn bench_prover(c: &mut Criterion) {
     let configs = find_configs();
     for (degree, (log_state_size, num_checkpoint_updates, circuit)) in configs {
-        println!("Degree bits: {:?}, log_state_size: {:?}, num_checkpoint_updates: {:?}", degree, log_state_size, num_checkpoint_updates);
+        println!(
+            "Degree bits: {:?}, log_state_size: {:?}, num_checkpoint_updates: {:?}",
+            degree, log_state_size, num_checkpoint_updates
+        );
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
         let all_checkpoint_updates = generate_sample_checkpoint_updates(1, num_checkpoint_updates);
         let old_head = Digest::ZERO;
@@ -51,4 +57,4 @@ fn bench_prover(c: &mut Criterion) {
 }
 
 criterion_group!(benches, bench_prover);
-criterion_main!(benches); 
+criterion_main!(benches);
