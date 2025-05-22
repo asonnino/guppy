@@ -88,14 +88,14 @@ impl MinnowMTServiceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minnow_lib::commit_single_update;
-    use minnow_lib::STREAM_VAL_LEN;
+    use minnow_lib::hash_commitment;
+    use minnow_lib::{STREAM_ID_LEN, STREAM_VAL_LEN};
 
     #[test]
     fn test_commit_single_update() {
         let d_prev = Digest::ZERO;
-        let l = vec![StreamPoint::new(1, [0; STREAM_VAL_LEN])];
-        let d = commit_single_update(&l, &d_prev);
+        let l = vec![StreamPoint::new([1; STREAM_ID_LEN], [0; STREAM_VAL_LEN])];
+        let d = hash_commitment(&l, &d_prev);
         println!("{:?}", d);
     }
 }

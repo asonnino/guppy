@@ -1,4 +1,6 @@
 use plonky2::gates::noop::NoopGate;
+use plonky2::iop::target::BoolTarget;
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
@@ -24,6 +26,20 @@ pub fn init_logging(level: log::LevelFilter) {
     builder.try_init().unwrap();
 }
 
+pub fn are_two_vectors_equal(
+    a: &[Target], b: &[Target],
+    builder: &mut MyCircuitBuilder,
+) -> BoolTarget {
+    assert_eq!(a.len(), b.len());
+
+    let mut result = builder._true();
+    for i in 0..a.len() {
+        let b = builder.is_equal(a[i], b[i]);
+        result = builder.and(result, b);
+    }
+    result
+}
+
 pub fn print_system_info(num_levels: usize, num_checkpoint_updates: usize) {
     info!(
         "Max Merkle tree levels: {} ({} elements)",
@@ -46,7 +62,11 @@ pub fn generate_sample_checkpoint_updates(
     let first_set = (0..num_checkpoint_updates)
         .map(|i| {
             StreamPoint::new_with_flag(
-                i.try_into().unwrap(),
+                {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(&i.to_le_bytes());
+                    bytes
+                },
                 [start_checkpoint_number as u8; 32],
                 true,
             )
@@ -58,7 +78,11 @@ pub fn generate_sample_checkpoint_updates(
             (0..num_checkpoint_updates)
                 .map(|i| {
                     StreamPoint::new_with_flag(
-                        i.try_into().unwrap(),
+                        {
+                            let mut bytes = [0u8; 32];
+                            bytes[..8].copy_from_slice(&i.to_le_bytes());
+                            bytes
+                        },
                         [(start_checkpoint_number + i) as u8; 32],
                         false,
                     )

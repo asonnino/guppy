@@ -7,7 +7,7 @@ use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
 use minnow_lib::utils::{generate_sample_checkpoint_updates, init_logging};
 use minnow_lib::utils::{Digest, C, D, F};
-use minnow_lib::{commit_single_update, CheckpointUpdates, StreamID};
+use minnow_lib::{hash_commitment, CheckpointUpdates, StreamID};
 use plonky2::field::types::Field;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
@@ -134,7 +134,7 @@ fn main() {
         cyclic_circuit_data.verify(proof.clone()).unwrap();
 
         // Tests
-        let new_head = commit_single_update(&checkpoint_updates, &prev_head);
+        let new_head = hash_commitment(&checkpoint_updates, &prev_head);
         assert_eq!(new_head.elements, proof.public_inputs[0..4]);
 
         state.apply_checkpoint_updates(&checkpoint_updates);

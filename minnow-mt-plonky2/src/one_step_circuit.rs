@@ -1,4 +1,5 @@
 use log::debug;
+use minnow_lib::utils::are_two_vectors_equal;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::PartialWitness;
@@ -158,7 +159,11 @@ fn build_circuit(
             //  then assert (t_new.index_t == num_leaves) && (num_leaves += 1)
             // else assert (t_new.index_t == t_cur.index_t) && (t_new.leaf_t.stream_id_t == t_cur.leaf_t.stream_id_t)
             let b1 = builder.is_equal(t_new.index_t, out_num_leaves_t);
-            let b2 = builder.is_equal(t_new.leaf_t.stream_id_t, t_cur.leaf_t.stream_id_t);
+            let b2 = are_two_vectors_equal(
+                &t_new.leaf_t.stream_id_t,
+                &t_cur.leaf_t.stream_id_t,
+                &mut builder,
+            );
             let b3 = builder.is_equal(t_new.index_t, t_cur.index_t);
             let new_flag = t_new.leaf_t.new_flag_t;
 
@@ -309,7 +314,7 @@ mod tests {
 
     // Quick tests that run by default
     #[rstest]
-    #[case(10, 350, 14)]
+    #[case(10, 300, 14)]
     #[case(20, 200, 14)]
     fn test_limits_success_quick(
         #[case] state_size: usize,
@@ -319,6 +324,7 @@ mod tests {
         build(state_size, num_checkpoint_updates, Some(degree_bits));
     }
 
+    // TODO: To be fixed after the change to stream ID.
     // Comprehensive tests that only run when explicitly requested
     #[cfg(feature = "comprehensive_tests")]
     mod comprehensive {

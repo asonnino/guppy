@@ -300,7 +300,7 @@ impl MerkleTree {
     /// Add a new leaf to the tree at the next available index.
     pub fn add_leaf(&mut self, leaf: &StreamPoint) -> usize {
         let idx = self.real_leaves;
-        trace!("adding leaf {} at index {}", leaf.id, idx);
+        trace!("adding leaf {:#?} at index {}", leaf.id, idx);
         self.update_leaf(idx, leaf)
             .expect("leaf index should be in bounds");
         self.real_leaves += 1;
@@ -348,7 +348,7 @@ impl MerkleTree {
         leaf_index: usize,
         leaf: &StreamPoint,
     ) -> Result<(), LeafIndexOutOfBounds> {
-        trace!("updating leaf {} at index {}", leaf.id, leaf_index);
+        trace!("updating leaf {:#?} at index {}", leaf.id, leaf_index);
         self.leaves[leaf_index] = leaf.encode();
         self.update_leaf_hash(
             leaf_index,
@@ -377,53 +377,53 @@ pub fn get_initial_root(num_levels: usize) -> Digest {
 
 #[cfg(test)]
 mod test {
-    use minnow_lib::STREAM_VAL_LEN;
+    use minnow_lib::{STREAM_ID_LEN, STREAM_VAL_LEN};
 
     use super::*;
 
     const TEST_INPUT: [StreamPoint; 9] = [
         StreamPoint {
-            id: 1,
+            id: [1; STREAM_ID_LEN],
             digest: [1; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 2,
+            id: [2; STREAM_ID_LEN],
             digest: [2; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 3,
+            id: [3; STREAM_ID_LEN],
             digest: [3; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 4,
+            id: [4; STREAM_ID_LEN],
             digest: [4; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 5,
+            id: [5; STREAM_ID_LEN],
             digest: [5; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 6,
+            id: [6; STREAM_ID_LEN],
             digest: [6; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 7,
+            id: [7; STREAM_ID_LEN],
             digest: [7; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 8,
+            id: [8; STREAM_ID_LEN],
             digest: [8; STREAM_VAL_LEN],
             new: false,
         },
         StreamPoint {
-            id: 9,
+            id: [9; STREAM_ID_LEN],
             digest: [9; STREAM_VAL_LEN],
             new: false,
         },
@@ -452,7 +452,7 @@ mod test {
 
     #[test]
     fn test_leaf_hash() {
-        let point = StreamPoint::new(1, [1; STREAM_VAL_LEN]);
+        let point = StreamPoint::new([1; STREAM_ID_LEN], [1; STREAM_VAL_LEN]);
         let l = leaf_hash(&point);
         println!("l: {:?}", l);
     }
@@ -465,7 +465,7 @@ mod test {
 
     #[test]
     fn test_merkle_tree_single_element() {
-        let test_inp = StreamPoint::new(1, [1; STREAM_VAL_LEN]);
+        let test_inp = StreamPoint::new([1; STREAM_ID_LEN], [1; STREAM_VAL_LEN]);
         let mt: MerkleTree = MerkleTree::build_from_stream_points(&[test_inp], NUM_LEVELS);
         let mut h = leaf_hash(&test_inp);
 
@@ -514,12 +514,12 @@ mod test {
                 assert!(proof.verify_proof(&mt.root(), leaf_data, index));
                 mt.update_leaf(
                     index,
-                    &StreamPoint::new(index as u32, [index as u8; STREAM_VAL_LEN]),
+                    &StreamPoint::new([index as u8; STREAM_ID_LEN], [index as u8; STREAM_VAL_LEN]),
                 )
                 .unwrap();
                 assert!(proof.verify_proof(
                     &mt.root(),
-                    &StreamPoint::new(index as u32, [index as u8; STREAM_VAL_LEN]),
+                    &StreamPoint::new([index as u8; STREAM_ID_LEN], [index as u8; STREAM_VAL_LEN]),
                     index
                 ));
             }

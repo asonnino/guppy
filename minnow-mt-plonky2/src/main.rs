@@ -1,5 +1,5 @@
 use hashbrown::HashMap;
-use minnow_lib::commit_single_update;
+use minnow_lib::hash_commitment;
 use minnow_lib::utils::generate_sample_checkpoint_updates;
 use minnow_lib::utils::init_logging;
 use minnow_lib::utils::{Digest, F};
@@ -69,7 +69,7 @@ fn main() {
         generate_sample_checkpoint_updates(num_checkpoints, num_checkpoint_updates);
     for c in 0..num_checkpoints {
         let checkpoint_updates = &all_checkpoint_updates[c];
-        let new_head = commit_single_update(&checkpoint_updates, &prev_head);
+        let new_head = hash_commitment(&checkpoint_updates, &prev_head);
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
             c,
             &checkpoint_updates,

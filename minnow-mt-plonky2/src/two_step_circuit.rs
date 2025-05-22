@@ -21,7 +21,7 @@ use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::Digest;
-use minnow_lib::utils::{C, D, F, H};
+use minnow_lib::utils::{are_two_vectors_equal, C, D, F, H};
 use minnow_lib::CheckpointUpdates;
 
 pub struct TwoStepMinnowMTCircuits {
@@ -110,7 +110,11 @@ impl BaseCircuit {
                 //  then assert (t_new.index_t == num_leaves) && (num_leaves += 1)
                 // else assert (t_new.index_t == t_cur.index_t) && (t_new.leaf_t.stream_id_t == t_cur.leaf_t.stream_id_t)
                 let b1 = builder.is_equal(t_new.index_t, out_num_leaves_t);
-                let b2 = builder.is_equal(t_new.leaf_t.stream_id_t, t_cur.leaf_t.stream_id_t);
+                let b2 = are_two_vectors_equal(
+                    &t_new.leaf_t.stream_id_t,
+                    &t_cur.leaf_t.stream_id_t,
+                    &mut builder,
+                );
                 let b3 = builder.is_equal(t_new.index_t, t_cur.index_t);
                 let new_flag = t_new.leaf_t.new_flag_t;
 
@@ -359,7 +363,7 @@ mod tests {
 
     use crate::merkle::get_initial_root;
 
-    use minnow_lib::commit_single_update;
+    use minnow_lib::hash_commitment;
     use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
 
     use super::*;
@@ -406,7 +410,7 @@ mod tests {
             proof.public_inputs[6..10]
         );
         assert_eq!(old_head.elements, proof.public_inputs[10..14]);
-        let new_head = commit_single_update(&all_checkpoint_updates[0], &old_head);
+        let new_head = hash_commitment(&all_checkpoint_updates[0], &old_head);
         assert_eq!(new_head.elements, proof.public_inputs[14..18]);
     }
 
@@ -442,7 +446,7 @@ mod tests {
             base_circuit.circuit_data.verify(proof.clone()).unwrap();
             info!("Base proof {} verified", i);
             // Update the head
-            cur_head = commit_single_update(&all_checkpoint_updates[i], &cur_head);
+            cur_head = hash_commitment(&all_checkpoint_updates[i], &cur_head);
             base_proofs.push(proof);
         }
 
