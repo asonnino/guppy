@@ -10,7 +10,8 @@ use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
 use log::info;
 
-use crate::{CheckpointUpdates, StreamPoint};
+use crate::CheckpointUpdates;
+use crate::{StreamPoint, UpdateBatch};
 
 #[derive(Debug)]
 pub struct CircuitInfo {
@@ -40,26 +41,44 @@ pub fn are_two_vectors_equal(
     result
 }
 
-pub fn print_system_info(num_levels: usize, num_checkpoint_updates: usize) {
+pub fn print_system_info(
+    num_levels: usize,
+    num_batches: usize,
+    batch_size: usize,
+) {
     info!(
         "Max Merkle tree levels: {} ({} elements)",
         num_levels,
         1 << (num_levels - 1)
     );
     info!(
-        "Number of checkpoint updates (fixed): {}",
-        num_checkpoint_updates
+        "Number of batches: {}",
+        num_batches
+    );
+    info!(
+        "Number of elements per batch: {}",
+        batch_size
     );
 }
 
-// Test vector: All checkpoints update the same set of stream points
 pub fn generate_sample_checkpoint_updates(
     num_checkpoints: usize,
-    num_checkpoint_updates: usize,
+    num_batches_per_checkpoint: usize,
+    batch_size: usize,
 ) -> Vec<CheckpointUpdates> {
-    let start_checkpoint_number = 0;
+    let all_checkpoint_updates = generate_sample_updates(num_checkpoints * num_batches_per_checkpoint, batch_size);
+    all_checkpoint_updates.chunks(num_batches_per_checkpoint).map(|chunk| chunk.to_vec()).collect()
+}
+
+// Test vector: All batches update the same set of stream points
+// [[StreamPoint; batch_size]; num_batches]
+pub fn generate_sample_updates(
+    num_batches: usize,
+    batch_size: usize,
+) -> Vec<UpdateBatch> {
+    let start_batch_number = 0;
     let mut all_updates = Vec::new();
-    let first_set = (0..num_checkpoint_updates)
+    let first_set: UpdateBatch = (0..batch_size)
         .map(|i| {
             StreamPoint::new_with_flag(
                 {
@@ -67,15 +86,15 @@ pub fn generate_sample_checkpoint_updates(
                     bytes[..8].copy_from_slice(&i.to_le_bytes());
                     bytes
                 },
-                [start_checkpoint_number as u8; 32],
+                [start_batch_number as u8; 32],
                 true,
             )
         })
         .collect();
     all_updates.push(first_set);
-    for _ in 1..num_checkpoints {
+    for _ in 1..num_batches {
         all_updates.push(
-            (0..num_checkpoint_updates)
+            (0..batch_size)
                 .map(|i| {
                     StreamPoint::new_with_flag(
                         {
@@ -83,13 +102,16 @@ pub fn generate_sample_checkpoint_updates(
                             bytes[..8].copy_from_slice(&i.to_le_bytes());
                             bytes
                         },
-                        [(start_checkpoint_number + i) as u8; 32],
+                        [(start_batch_number + i) as u8; 32],
                         false,
                     )
                 })
                 .collect(),
         );
     }
+
+    assert_eq!(all_updates.len(), num_batches);
+    assert_eq!(all_updates[0].len(), batch_size);
     all_updates
 }
 

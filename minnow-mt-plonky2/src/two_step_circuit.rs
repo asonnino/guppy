@@ -14,14 +14,15 @@ use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::with_context;
 
-use crate::merkle::add_merkle_proof_verification_to_circuit;
 use crate::merkle::MerkleProofTargets;
+use crate::process_many_batches;
+use crate::CircuitState;
 use crate::MinnowMTServiceState;
 use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::Digest;
-use minnow_lib::utils::{are_two_vectors_equal, C, D, F, H};
+use minnow_lib::utils::{C, D, F};
 use minnow_lib::CheckpointUpdates;
 
 pub struct TwoStepMinnowMTCircuits {
@@ -62,111 +63,42 @@ impl BaseCircuit {
      * (i) prev_targets,
      * (ii) new_targets
      */
-    pub fn new(log_state_size: usize, num_checkpoint_updates: usize) -> Self {
+    pub fn new(log_state_size: usize, num_batches: usize, batch_size: usize) -> Self {
         info!("Building base circuit");
         let num_levels = log_state_size + 1;
-        print_system_info(num_levels, num_checkpoint_updates);
+        print_system_info(num_levels, num_batches, batch_size);
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let mut in_mt_root_t = builder.add_virtual_hash();
-        let mut out_mt_root_t = builder.add_virtual_hash();
+        let in_state_t = CircuitState::new(&mut builder);
 
-        let mut prev_targets = vec![];
-        let mut new_targets = vec![];
-        let mut checkpoint_commitment_inputs = vec![];
+        let (prev_targets, new_targets, out_state_t) = process_many_batches(
+            &mut builder,
+            num_batches,
+            batch_size,
+            num_levels,
+            &in_state_t,
+        );
 
-        let in_num_leaves_t = builder.add_virtual_public_input();
-        let mut out_num_leaves_t = in_num_leaves_t;
+        builder.register_public_input(in_state_t.num_leaves_t);
+        builder.register_public_input(out_state_t.num_leaves_t);
 
-        let one = builder.one();
+        builder.register_public_inputs(&in_state_t.root_t.elements);
+        builder.register_public_inputs(&out_state_t.root_t.elements);
 
-        with_context!(builder, "process checkpoint updates", {
-            for i in 0..num_checkpoint_updates {
-                let t_cur: MerkleProofTargets;
-                let t_new: MerkleProofTargets;
-                // i) Check inclusion proof
-                t_cur = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
-                if i == 0 {
-                    in_mt_root_t = t_cur.root_t;
-                } else {
-                    builder.connect_hashes(t_cur.root_t, out_mt_root_t);
-                }
-                prev_targets.push(t_cur.clone());
-
-                // ii) Check inclusion proof after update
-                t_new = add_merkle_proof_verification_to_circuit(&mut builder, num_levels);
-                new_targets.push(t_new.clone());
-
-                // iii) Connect the siblings
-                assert_eq!(t_cur.proof_t.siblings.len(), t_new.proof_t.siblings.len());
-                for i in 0..t_cur.proof_t.siblings.len() {
-                    builder.connect_hashes(t_cur.proof_t.siblings[i], t_new.proof_t.siblings[i]);
-                }
-
-                // (iv) Logic: If old leaf, check that stream IDs match. If new leaf, check that index is incremented.
-                // if t_new.leaf_t.new_flag_t
-                //  then assert (t_new.index_t == num_leaves) && (num_leaves += 1)
-                // else assert (t_new.index_t == t_cur.index_t) && (t_new.leaf_t.stream_id_t == t_cur.leaf_t.stream_id_t)
-                let b1 = builder.is_equal(t_new.index_t, out_num_leaves_t);
-                let b2 = are_two_vectors_equal(
-                    &t_new.leaf_t.stream_id_t,
-                    &t_cur.leaf_t.stream_id_t,
-                    &mut builder,
-                );
-                let b3 = builder.is_equal(t_new.index_t, t_cur.index_t);
-                let new_flag = t_new.leaf_t.new_flag_t;
-
-                // if new_flag then b1 = true
-                let b5 = builder.select(new_flag, b1.target, one);
-                builder.assert_one(b5);
-
-                let next_index = builder.add(out_num_leaves_t, one);
-                out_num_leaves_t = builder.select(new_flag, next_index, out_num_leaves_t);
-
-                // if not new_flag then b2 = true
-                let b6 = builder.select(new_flag, one, b2.target);
-                builder.assert_one(b6);
-
-                // if not new_flag then b3 = true
-                let b7 = builder.select(new_flag, one, b3.target);
-                builder.assert_one(b7);
-
-                // v) MerkleLeaf === StreamPoint, so we can use the same targets to compute the checkpoint commitment
-                checkpoint_commitment_inputs.extend(t_new.leaf_t.get_all_targets());
-
-                // vi) Update the current root
-                out_mt_root_t = t_new.root_t;
-            }
-        });
-
-        // Register the final root as a public input
-        builder.register_public_input(out_num_leaves_t);
-        builder.register_public_inputs(&in_mt_root_t.elements);
-        builder.register_public_inputs(&out_mt_root_t.elements);
-
-        let checkpoint_commitment: HashOutTarget;
-        with_context!(builder, "hash checkpoint commitment", {
-            checkpoint_commitment = builder.hash_or_noop::<H>(checkpoint_commitment_inputs);
-        });
-
-        // cur_head = H(inner_head || cur_commitment)
-        let cur_checkpoint_head = builder.add_virtual_hash_public_input();
-        let hash_chain_inputs =
-            [cur_checkpoint_head.elements, checkpoint_commitment.elements].concat();
-        let new_checkpoint_head = builder.hash_or_noop::<H>(hash_chain_inputs);
-        builder.register_public_inputs(&new_checkpoint_head.elements);
+        builder.register_public_inputs(&in_state_t.checkpoint_head_t.elements);
+        builder.register_public_inputs(&out_state_t.checkpoint_head_t.elements);
 
         let inputs = BaseInputs {
             prev_targets,
             new_targets,
-            in_num_leaves_t,
-            in_checkpoint_head_t: cur_checkpoint_head,
+            in_num_leaves_t: in_state_t.num_leaves_t,
+            in_checkpoint_head_t: in_state_t.checkpoint_head_t,
         };
         let outputs = BaseOutputs {
-            out_mt_root_t,
-            out_checkpoint_head_t: new_checkpoint_head,
+            out_mt_root_t: out_state_t.root_t,
+            out_checkpoint_head_t: out_state_t.checkpoint_head_t,
         };
         // builder.print_gate_counts(0);
         let num_gates = builder.num_gates();
@@ -186,7 +118,6 @@ impl BaseCircuit {
 
     pub fn apply_checkpoint_updates_and_set_inputs(
         &self,
-        // checkpoint_number: usize,
         checkpoint_updates: &CheckpointUpdates,
         zk_service_state: &mut MinnowMTServiceState,
         cur_checkpoint_head: &Digest,
@@ -201,7 +132,7 @@ impl BaseCircuit {
         pw.set_hash_target(self.inputs.in_checkpoint_head_t, *cur_checkpoint_head)
             .unwrap();
 
-        for (i, update) in checkpoint_updates.iter().enumerate() {
+        for (i, update) in checkpoint_updates.iter().flatten().enumerate() {
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.prev_targets[i], &update.id);
             zk_service_state.update_leaf(&update);
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.new_targets[i], &update.id);
@@ -364,7 +295,7 @@ mod tests {
     use crate::merkle::get_initial_root;
 
     use minnow_lib::hash_commitment;
-    use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
+    use minnow_lib::utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest};
 
     use super::*;
     use hashbrown::HashMap;
@@ -374,18 +305,19 @@ mod tests {
 
     #[test]
     fn base_circuit_test() {
-        // init_logging(log::LevelFilter::Info);
         let log_state_size = 10;
-        let num_checkpoint_updates = 225;
-        let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+        let num_batches = 5; // also equal to num_batches_per_checkpoint
+        let batch_size = 10;
+        let circuit = BaseCircuit::new(log_state_size, num_batches, batch_size);
         println!("{:?}", circuit.circuit_info);
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(1, num_checkpoint_updates);
+        let checkpoint_updates = generate_sample_updates(num_batches, batch_size);
         let old_head = Digest::ZERO;
         let old_num_leaves = zk_service_state.get_num_leaves();
         let old_root = zk_service_state.get_root();
+
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
-            &all_checkpoint_updates[0],
+            &checkpoint_updates,
             &mut zk_service_state,
             &old_head,
         );
@@ -410,59 +342,64 @@ mod tests {
             proof.public_inputs[6..10]
         );
         assert_eq!(old_head.elements, proof.public_inputs[10..14]);
-        let new_head = hash_commitment(&all_checkpoint_updates[0], &old_head);
+        let new_head = hash_commitment(&checkpoint_updates, batch_size, &old_head);
         assert_eq!(new_head.elements, proof.public_inputs[14..18]);
     }
 
     #[test]
-    fn test_cyclic_circuit() {
-        // init_logging(log::LevelFilter::Info);
+    fn test_e2e() {
         let log_state_size = 10;
-        let num_checkpoint_updates = 100;
-        let num_checkpoints = 10;
+        let num_batches_per_checkpoint = 5; // also equal to num_batches_per_checkpoint
+        let batch_size = 10;
+        let num_checkpoints = 5;
+        let all_checkpoint_updates = generate_sample_checkpoint_updates(
+            num_checkpoints,
+            num_batches_per_checkpoint,
+            batch_size,
+        );
+
         let initial_root = get_initial_root(log_state_size + 1);
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(10, num_checkpoint_updates);
 
-        let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+        let base_circuit = BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
         let cyclic_circuit =
             CyclicSequentialCircuit::new(&initial_root, &base_circuit.circuit_data);
 
-        info!("Base circuit: {:?}", base_circuit.circuit_info);
-        info!("Cyclic circuit: {:?}", cyclic_circuit.circuit_info);
+        println!("Base circuit: {:?}", base_circuit.circuit_info);
+        println!("Cyclic circuit: {:?}", cyclic_circuit.circuit_info);
 
         let mut cur_head = Digest::ZERO;
         let mut base_proofs = vec![];
 
         // Generate all base proofs
         for i in 0..num_checkpoints {
-            // Apply the first checkpoint update
+            let sample_updates = &all_checkpoint_updates[i];
+
             let pw = base_circuit.apply_checkpoint_updates_and_set_inputs(
-                &all_checkpoint_updates[i],
+                sample_updates,
                 &mut zk_service_state,
                 &cur_head,
             );
             let proof = base_circuit.circuit_data.prove(pw).unwrap();
-            base_circuit.circuit_data.verify(proof.clone()).unwrap();
-            info!("Base proof {} verified", i);
+            base_proofs.push(proof.clone());
+
+            base_circuit.circuit_data.verify(proof).unwrap();
+            println!("Base proof {} verified", i);
+
             // Update the head
-            cur_head = hash_commitment(&all_checkpoint_updates[i], &cur_head);
-            base_proofs.push(proof);
+            cur_head = hash_commitment(sample_updates, batch_size, &cur_head);
+            println!("Cur head: {:?}", cur_head);
         }
 
-        // Generate all cyclic proofs
+        // Generate all cyclic proofs sequentially
         let verifier_data = &cyclic_circuit.circuit_data.verifier_only;
         let common_data = &cyclic_circuit.circuit_data.common;
         let starter_proof =
             cyclic_base_proof(&common_data, &verifier_data, HashMap::<usize, F>::new());
         let mut prev_proof = starter_proof;
         for i in 0..num_checkpoints {
-            let pw = cyclic_circuit.set_inputs(
-                i == 0,
-                &base_proofs[i],
-                &prev_proof,
-                &cyclic_circuit.circuit_data.verifier_only,
-            );
+            let pw =
+                cyclic_circuit.set_inputs(i == 0, &base_proofs[i], &prev_proof, &verifier_data);
             let proof = cyclic_circuit.circuit_data.prove(pw).unwrap();
             cyclic_circuit.circuit_data.verify(proof.clone()).unwrap();
             check_cyclic_proof_verifier_data(&proof, verifier_data, common_data).unwrap();

@@ -25,11 +25,17 @@ pub struct ThreeStepMinnowMTCircuits {
 }
 
 impl ThreeStepMinnowMTCircuits {
-    pub fn new(log_state_size: usize, num_updates_per_time_slot: usize, batch_size: usize) -> Self {
-        assert!(num_updates_per_time_slot % batch_size == 0);
-        let base_circuit = BaseCircuit::new(log_state_size, batch_size);
+    pub fn new(
+        log_state_size: usize,
+        total_num_batches: usize,
+        num_batches_per_base_circuit: usize,
+        batch_size: usize,
+    ) -> Self {
+        assert!(total_num_batches % num_batches_per_base_circuit == 0);
+        let base_circuit =
+            BaseCircuit::new(log_state_size, num_batches_per_base_circuit, batch_size);
 
-        let num_base_circuits_to_compress = num_updates_per_time_slot / batch_size;
+        let num_base_circuits_to_compress = total_num_batches / num_batches_per_base_circuit;
 
         // num_proofs_to_compress_per_level
         let branching_factor = 2;
@@ -162,19 +168,23 @@ mod tests {
     use super::*;
     use crate::MinnowMTServiceState;
     use minnow_lib::hash_commitment;
-    use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
+    use minnow_lib::utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest};
     use std::time::Instant;
 
     #[test]
     fn test_compressed_circuit() {
-        // init_logging(log::LevelFilter::Debug);
         let log_state_size = 10;
-        let num_checkpoint_updates = 300;
+        let num_batches = 6;
+        let batch_size = 50;
+        let num_checkpoints = 2;
+        // let num_batches_per_base_circuit = 2;
+        // let total_num_batches = num_batches_per_base_circuit * num_batches;
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+        let circuit = BaseCircuit::new(log_state_size, num_batches, batch_size);
 
         // Generate two base proofs
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(2, num_checkpoint_updates);
+        let all_checkpoint_updates =
+            generate_sample_checkpoint_updates(num_checkpoints, num_batches, batch_size);
         let mut head = Digest::ZERO;
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
             &all_checkpoint_updates[0],
@@ -182,7 +192,7 @@ mod tests {
             &head,
         );
         let base_proof_0 = circuit.circuit_data.prove(pw).unwrap();
-        head = hash_commitment(&all_checkpoint_updates[0], &head);
+        head = hash_commitment(&all_checkpoint_updates[0], batch_size, &head);
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
             &all_checkpoint_updates[1],
             &mut zk_service_state,

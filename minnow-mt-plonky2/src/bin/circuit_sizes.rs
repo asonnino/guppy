@@ -4,6 +4,8 @@ use minnow_mt_plonky2::three_step_circuit::CompressedCircuit;
 use minnow_mt_plonky2::two_step_circuit::BaseCircuit;
 use std::env;
 
+const BATCH_SIZE: usize = 50;
+
 fn measure_one_step_circuit() {
     println!("One Step Circuit Parameters:");
     println!("============================");
@@ -24,7 +26,10 @@ fn measure_one_step_circuit() {
         for num_checkpoint_updates in
             (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step)
         {
-            let circuit = MinnowMTOneStepCircuit::new(log_state_size, num_checkpoint_updates, None);
+            let num_batches = num_checkpoint_updates / BATCH_SIZE;
+            assert!(num_batches * BATCH_SIZE == num_checkpoint_updates);
+            let circuit =
+                MinnowMTOneStepCircuit::new(log_state_size, num_batches, BATCH_SIZE, None);
             let cur_info = circuit.circuit_info;
             if cur_info.degree_bits != prev_info.degree_bits {
                 println!(
@@ -58,7 +63,9 @@ fn measure_base_circuit() {
     for num_checkpoint_updates in
         (start_num_checkpoint_updates..=end_num_checkpoint_updates).step_by(step)
     {
-        let circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+        let num_batches = num_checkpoint_updates / BATCH_SIZE;
+        assert!(num_batches * BATCH_SIZE == num_checkpoint_updates);
+        let circuit = BaseCircuit::new(log_state_size, num_batches, BATCH_SIZE);
         let cur_info = circuit.circuit_info;
         if cur_info.degree_bits != prev_info.degree_bits {
             println!(
@@ -77,7 +84,9 @@ fn measure_compressed_circuit() {
     println!("============================");
     let log_state_size = 20;
     let num_checkpoint_updates = 500;
-    let base_circuit = BaseCircuit::new(log_state_size, num_checkpoint_updates);
+    let num_batches = num_checkpoint_updates / BATCH_SIZE;
+    assert!(num_batches * BATCH_SIZE == num_checkpoint_updates);
+    let base_circuit = BaseCircuit::new(log_state_size, num_batches, BATCH_SIZE);
     println!("Base circuit info: {:?}", base_circuit.circuit_info);
 
     println!("\nBranching Factor\tGates\tDegree Bits");

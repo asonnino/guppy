@@ -1,5 +1,6 @@
 pub mod utils;
 
+use plonky2::hash::hash_types::HashOutTarget;
 use utils::{Digest, MyCircuitBuilder as CircuitBuilder, MyPartialWitness as PartialWitness, F, H};
 
 use plonky2::field::types::Field;
@@ -107,21 +108,6 @@ impl EncodedStreamPoint {
     }
 }
 
-// The updates from a single checkpoint. The size is m
-pub type CheckpointUpdates = Vec<StreamPoint>;
-
-pub fn hash_commitment(updates: &CheckpointUpdates, prev_head: &Digest) -> Digest {
-    let mut checkpoint_commitment_inputs = Vec::new();
-    for stream_point in updates {
-        checkpoint_commitment_inputs.extend(stream_point.encode().to_arr());
-    }
-
-    // TODO: Should we use hash_or_noop or hash_pad here?
-    let checkpoint_commitment = H::hash_or_noop(checkpoint_commitment_inputs.as_slice());
-    let f = [prev_head.elements, checkpoint_commitment.elements].concat();
-    H::hash_or_noop(&f)
-}
-
 #[derive(Clone, Debug)]
 pub struct StreamPointTarget {
     pub stream_id_t: Vec<Target>,
@@ -175,4 +161,79 @@ impl StreamPointTarget {
         pw.set_target(self.new_flag_t.target, encoded_leaf_data.new_flag_f)
             .unwrap();
     }
+}
+
+// A batch of updates of a fixed size. Our circuits will be built to handle x such batches.
+pub type UpdateBatch = Vec<StreamPoint>;
+// Each checkpoint contains a collection of batches.
+pub type CheckpointUpdates = Vec<UpdateBatch>;
+
+pub fn hash_commitment(
+    updates: &CheckpointUpdates,
+    batch_size: usize,
+    prev_head: &Digest
+) -> Digest {
+    let mut batch_commitments = Vec::new();
+
+    // Note: This computation can be parallelized.
+    for batch in updates {
+        if batch.len() > batch_size {
+            panic!("Batch size is too large");
+        }
+        if batch.len() < batch_size {
+            let mut padded_batch = batch.to_vec();
+            while padded_batch.len() < batch_size {
+                padded_batch.push(StreamPoint::default());
+            }
+            batch_commitments.push(commit_batch(&padded_batch));
+        } else {
+            batch_commitments.push(commit_batch(batch));
+        }
+    }
+
+    // Commit to the batches in a hash chain style
+    let mut checkpoint_commitment = prev_head.clone();
+    for batch_commitment in batch_commitments {
+        let f = [checkpoint_commitment.elements, batch_commitment.elements].concat();
+        checkpoint_commitment = H::hash_or_noop(&f);
+    }
+    checkpoint_commitment
+}
+
+pub fn commit_batch(batch: &[StreamPoint]) -> Digest {
+    let mut inputs = Vec::new();
+    for stream_point in batch {
+        inputs.extend(stream_point.encode().to_arr());
+    }
+    H::hash_or_noop(inputs.as_slice())
+}
+
+pub fn hash_commitment_t(
+    update_targets: &Vec<Vec<StreamPointTarget>>,
+    prev_head: &HashOutTarget,
+    builder: &mut CircuitBuilder,
+) -> HashOutTarget {
+    let mut batch_commitments_t = Vec::new();
+    for batch in update_targets {
+        let batch_commitment = commit_batch_t(batch, builder);
+        batch_commitments_t.push(batch_commitment);
+    }
+
+    let mut x = prev_head.clone();
+    for c in batch_commitments_t {
+        let f = [x.elements, c.elements].concat();
+        x = builder.hash_or_noop::<H>(f);
+    }
+    x
+}
+
+pub fn commit_batch_t(
+    batch: &Vec<StreamPointTarget>,
+    builder: &mut CircuitBuilder,
+) -> HashOutTarget {
+    let mut inputs = Vec::new();
+    for stream_point in batch {
+        inputs.extend(stream_point.get_all_targets());
+    }
+    builder.hash_or_noop::<H>(inputs)
 }

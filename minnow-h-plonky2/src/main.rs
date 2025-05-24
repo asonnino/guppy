@@ -5,7 +5,7 @@ use log::info;
 
 use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
-use minnow_lib::utils::{generate_sample_checkpoint_updates, init_logging};
+use minnow_lib::utils::{generate_sample_updates, init_logging};
 use minnow_lib::utils::{Digest, C, D, F};
 use minnow_lib::{hash_commitment, CheckpointUpdates, StreamID};
 use plonky2::field::types::Field;
@@ -104,7 +104,7 @@ fn main() {
 
     let num_checkpoints = 10;
     let all_checkpoint_updates =
-        generate_sample_checkpoint_updates(num_checkpoints, num_checkpoint_updates);
+        generate_sample_updates(num_checkpoints, num_checkpoint_updates);
 
     let mut state = MinnowHServiceState::new(&tracking_streams);
     let mut prev_head = Digest::ZERO;

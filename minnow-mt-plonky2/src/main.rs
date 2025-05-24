@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 use minnow_lib::hash_commitment;
-use minnow_lib::utils::generate_sample_checkpoint_updates;
+use minnow_lib::utils::generate_sample_updates;
 use minnow_lib::utils::init_logging;
 use minnow_lib::utils::{Digest, F};
 use minnow_mt_plonky2::one_step_circuit::MinnowMTOneStepCircuit;
@@ -23,15 +23,19 @@ struct Args {
     log_state_size: usize,
 
     /// Number of checkpoint updates
-    #[arg(short, long, default_value_t = 300)]
-    checkpoint_updates: usize,
+    #[arg(short, long, default_value_t = 6)]
+    num_batches: usize,
+
+    /// Number of stream points per batch
+    #[arg(short, long, default_value_t = 50)]
+    batch_size: usize,
 
     /// Logarithmic estimate of the number of gates
     #[arg(short = 'g', long)]
     degree_bits: Option<usize>,
 
     /// Build the circuit only, don't prove
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short = 'f', long, default_value_t = false)]
     build_only: bool,
 
     /// Debug logs
@@ -50,9 +54,10 @@ fn main() {
     }
 
     let log_state_size = args.log_state_size;
-    let num_checkpoint_updates = args.checkpoint_updates;
+    let num_batches = args.num_batches;
+    let batch_size = args.batch_size;
     let degree_bits = args.degree_bits;
-    let circuit = MinnowMTOneStepCircuit::new(log_state_size, num_checkpoint_updates, degree_bits);
+    let circuit = MinnowMTOneStepCircuit::new(log_state_size, num_batches, batch_size, degree_bits);
     let verifier_data = &circuit.circuit_data.verifier_only;
     let common_data = &circuit.circuit_data.common;
     debug!("Degree: 2^{}", common_data.degree_bits());
@@ -64,12 +69,14 @@ fn main() {
     let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
     let mut proof = cyclic_base_proof(&common_data, verifier_data, HashMap::<usize, F>::new());
     let mut prev_head = Digest::ZERO;
+
+    // A scenario where each checkpoint has num_batches batches and we have num_checkpoints checkpoints.
     let num_checkpoints = 10;
-    let all_checkpoint_updates =
-        generate_sample_checkpoint_updates(num_checkpoints, num_checkpoint_updates);
+    let total_num_batches = num_checkpoints * num_batches;
+    let all_updates = generate_sample_updates(total_num_batches, batch_size);
     for c in 0..num_checkpoints {
-        let checkpoint_updates = &all_checkpoint_updates[c];
-        let new_head = hash_commitment(&checkpoint_updates, &prev_head);
+        let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
+        let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
             c,
             &checkpoint_updates,

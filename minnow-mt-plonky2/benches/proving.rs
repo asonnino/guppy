@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use minnow_lib::utils::{generate_sample_checkpoint_updates, Digest};
+use minnow_lib::utils::{generate_sample_updates, Digest};
 use minnow_mt_plonky2::{two_step_circuit::BaseCircuit, MinnowMTServiceState};
 use std::collections::HashMap;
 
@@ -40,7 +40,7 @@ fn bench_prover(c: &mut Criterion) {
             degree, log_state_size, num_checkpoint_updates
         );
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(1, num_checkpoint_updates);
+        let all_checkpoint_updates = generate_sample_updates(1, num_checkpoint_updates);
         let old_head = Digest::ZERO;
         let pw = circuit.apply_checkpoint_updates_and_set_inputs(
             &all_checkpoint_updates[0],

@@ -348,7 +348,12 @@ impl MerkleTree {
         leaf_index: usize,
         leaf: &StreamPoint,
     ) -> Result<(), LeafIndexOutOfBounds> {
-        trace!("updating leaf {:#?} at index {}", leaf.id, leaf_index);
+        trace!(
+            "updating leaf {:#?} at index {} with contents {:#?}",
+            leaf.id,
+            leaf_index,
+            leaf
+        );
         self.leaves[leaf_index] = leaf.encode();
         self.update_leaf_hash(
             leaf_index,
