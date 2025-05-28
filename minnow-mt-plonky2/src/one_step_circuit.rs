@@ -1,4 +1,5 @@
 use log::debug;
+use minnow_lib::UpdateBatch;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::PartialWitness;
@@ -22,7 +23,6 @@ use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::{Digest, C, D, F};
-use minnow_lib::CheckpointUpdates;
 
 // Called Minnow-MT-A in the paper.
 pub struct MinnowMTOneStepCircuit {
@@ -55,10 +55,10 @@ impl MinnowMTOneStepCircuit {
         build_circuit(state_size, num_batches, batch_size, degree_bits)
     }
 
-    pub fn apply_checkpoint_updates_and_set_inputs(
+    pub fn apply_update_batch_and_set_inputs(
         &self,
         checkpoint_number: usize,
-        checkpoint_updates: &CheckpointUpdates,
+        update_batch: &UpdateBatch,
         zk_service_state: &mut MinnowMTServiceState,
         prev_proof: &ProofWithPublicInputs<F, C, D>,
         base_case: bool,
@@ -79,7 +79,7 @@ impl MinnowMTOneStepCircuit {
         pw.set_verifier_data_target(&self.private_inputs.verifier_data_target, verifier_data)
             .unwrap();
 
-        for (i, update) in checkpoint_updates.iter().flatten().enumerate() {
+        for (i, update) in update_batch.iter().enumerate() {
             zk_service_state.add_proof_targets(
                 &mut pw,
                 &self.private_inputs.prev_targets[i],
@@ -237,8 +237,10 @@ fn build_circuit(
 
 #[cfg(test)]
 mod tests {
+    use crate::DEFAULT_BATCH_SIZE;
+
     use super::*;
-    use minnow_lib::hash_commitment;
+    use minnow_lib::{flatten_checkpoint_updates, hash_commitment};
     use plonky2::field::types::Field;
     use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use plonky2::recursion::dummy_circuit::cyclic_base_proof;
@@ -251,10 +253,12 @@ mod tests {
 
     fn build(
         state_size: usize,
-        num_batches: usize,
-        batch_size: usize,
+        num_checkpoint_updates: usize,
         degree_bits: Option<usize>,
     ) -> MinnowMTOneStepCircuit {
+        let batch_size = DEFAULT_BATCH_SIZE;
+        let num_batches = num_checkpoint_updates / batch_size;
+        assert!(num_batches * batch_size == num_checkpoint_updates);
         println!(
             "state_size: {}, num_batches: {}, batch_size: {}, degree_bits: {:?}",
             state_size, num_batches, batch_size, degree_bits
@@ -270,9 +274,10 @@ mod tests {
     fn test_e2e() {
         let state_size = 10;
         let num_batches = 5;
-        let batch_size = 50;
+        let batch_size = DEFAULT_BATCH_SIZE; // same as batch size per checkpoint
+        let num_checkpoint_updates = 250;
         let degree_bits = None;
-        let circuit = build(state_size, num_batches, batch_size, degree_bits);
+        let circuit = build(state_size, num_checkpoint_updates, degree_bits);
         let verifier_data = &circuit.circuit_data.verifier_only;
         let common_data = &circuit.circuit_data.common;
 
@@ -288,9 +293,10 @@ mod tests {
         for c in 0..num_checkpoints {
             let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
             let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
-            let pw = circuit.apply_checkpoint_updates_and_set_inputs(
+            let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
+            let pw = circuit.apply_update_batch_and_set_inputs(
                 c,
-                &checkpoint_updates,
+                &flattened_updates,
                 &mut zk_service_state,
                 &proof,
                 c == 0,
@@ -338,9 +344,7 @@ mod tests {
         #[case] num_checkpoint_updates: usize,
         #[case] degree_bits: usize,
     ) {
-        let batch_size = 50;
-        let num_batches = num_checkpoint_updates / batch_size;
-        build(state_size, num_batches, batch_size, Some(degree_bits));
+        build(state_size, num_checkpoint_updates, Some(degree_bits));
     }
 
     // TODO: To be fixed after the change to stream ID.
@@ -352,17 +356,17 @@ mod tests {
 
         #[rstest]
         #[case(10, 300, 14)]
-        #[case(10, 900, 15)]
-        #[case(10, 2050, 16)]
-        #[case(10, 4300, 17)]
+        #[case(10, 850, 15)]
+        #[case(10, 1950, 16)]
+        #[case(10, 4100, 17)]
         #[case(20, 200, 14)]
         #[case(20, 500, 15)]
-        #[case(20, 1200, 16)]
-        #[case(20, 2550, 17)]
+        #[case(20, 1150, 16)]
+        #[case(20, 2450, 17)]
         #[case(30, 100, 14)]
         #[case(30, 350, 15)]
-        #[case(30, 850, 16)]
-        #[case(30, 1800, 17)]
+        #[case(30, 800, 16)]
+        #[case(30, 1750, 17)]
         fn test_limits_success(
             #[case] state_size: usize,
             #[case] num_checkpoint_updates: usize,
@@ -373,29 +377,29 @@ mod tests {
 
         #[rstest]
         #[should_panic]
-        #[case(10, 350, 14)]
+        #[case(10, 300, 14)]
         #[should_panic]
-        #[case(10, 900, 15)]
+        #[case(10, 850, 15)]
         #[should_panic]
-        #[case(10, 2050, 16)]
+        #[case(10, 1950, 16)]
         #[should_panic]
-        #[case(10, 4300, 17)]
+        #[case(10, 4100, 17)]
         #[should_panic]
         #[case(20, 200, 14)]
         #[should_panic]
         #[case(20, 500, 15)]
         #[should_panic]
-        #[case(20, 1200, 16)]
+        #[case(20, 1150, 16)]
         #[should_panic]
-        #[case(20, 2550, 17)]
+        #[case(20, 2450, 17)]
         #[should_panic]
         #[case(30, 100, 14)]
         #[should_panic]
         #[case(30, 350, 15)]
         #[should_panic]
-        #[case(30, 850, 16)]
+        #[case(30, 800, 16)]
         #[should_panic]
-        #[case(30, 1800, 17)]
+        #[case(30, 1750, 17)]
         fn test_limits_failure(
             #[case] state_size: usize,
             #[case] num_checkpoint_updates: usize,

@@ -167,8 +167,8 @@ impl CompressedCircuit {
 mod tests {
     use super::*;
     use crate::MinnowMTServiceState;
-    use minnow_lib::hash_commitment;
     use minnow_lib::utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest};
+    use minnow_lib::{flatten_checkpoint_updates, hash_commitment};
     use std::time::Instant;
 
     #[test]
@@ -186,15 +186,15 @@ mod tests {
         let all_checkpoint_updates =
             generate_sample_checkpoint_updates(num_checkpoints, num_batches, batch_size);
         let mut head = Digest::ZERO;
-        let pw = circuit.apply_checkpoint_updates_and_set_inputs(
-            &all_checkpoint_updates[0],
+        let pw = circuit.apply_update_batch_and_set_inputs(
+            &flatten_checkpoint_updates(all_checkpoint_updates[0].clone()),
             &mut zk_service_state,
             &head,
         );
         let base_proof_0 = circuit.circuit_data.prove(pw).unwrap();
         head = hash_commitment(&all_checkpoint_updates[0], batch_size, &head);
-        let pw = circuit.apply_checkpoint_updates_and_set_inputs(
-            &all_checkpoint_updates[1],
+        let pw = circuit.apply_update_batch_and_set_inputs(
+            &flatten_checkpoint_updates(all_checkpoint_updates[1].clone()),
             &mut zk_service_state,
             &head,
         );

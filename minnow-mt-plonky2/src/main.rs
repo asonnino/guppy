@@ -1,10 +1,12 @@
 use hashbrown::HashMap;
+use minnow_lib::flatten_checkpoint_updates;
 use minnow_lib::hash_commitment;
 use minnow_lib::utils::generate_sample_updates;
 use minnow_lib::utils::init_logging;
 use minnow_lib::utils::{Digest, F};
 use minnow_mt_plonky2::one_step_circuit::MinnowMTOneStepCircuit;
 use minnow_mt_plonky2::MinnowMTServiceState;
+use minnow_mt_plonky2::DEFAULT_BATCH_SIZE;
 use plonky2::field::types::Field;
 use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
 use plonky2::recursion::dummy_circuit::cyclic_base_proof;
@@ -27,7 +29,7 @@ struct Args {
     num_batches: usize,
 
     /// Number of stream points per batch
-    #[arg(short, long, default_value_t = 50)]
+    #[arg(short, long, default_value_t = DEFAULT_BATCH_SIZE)]
     batch_size: usize,
 
     /// Logarithmic estimate of the number of gates
@@ -77,9 +79,10 @@ fn main() {
     for c in 0..num_checkpoints {
         let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
         let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
-        let pw = circuit.apply_checkpoint_updates_and_set_inputs(
+        let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
+        let pw = circuit.apply_update_batch_and_set_inputs(
             c,
-            &checkpoint_updates,
+            &flattened_updates,
             &mut zk_service_state,
             &proof,
             c == 0,

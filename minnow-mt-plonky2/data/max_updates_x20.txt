@@ -1,0 +1,24 @@
+   Compiling minnow-mt-plonky2 v0.1.0 (/Users/saikrishnadeepakmaram/Desktop/minnow/minnow-mt-plonky2)
+    Finished `release` profile [optimized] target(s) in 4.70s
+     Running `/Users/saikrishnadeepakmaram/Desktop/minnow/target/release/determine_max_updates 20`
+Finding change point starting from 1 for 2**13 gates
+Degree: 1 14
+Degree: 2 14
+Degree: 3 14
+Degree: 4 14
+Degree: 5 15
+Changing target degree. Finding change point for 14 gates
+Change point: 4 14
+Finding change point starting from 10 for 2**15 gates
+Degree: 10 15
+Degree: 11 16
+Change point: 10 15
+Finding change point starting from 22 for 2**16 gates
+Degree: 22 16
+Degree: 23 16
+Degree: 24 17
+Change point: 23 16
+Finding change point starting from 48 for 2**17 gates
+Degree: 48 17
+Degree: 49 17
+Failed 3 times in a row. Exiting. Tried degree bits from 17 to 19

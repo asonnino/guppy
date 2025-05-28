@@ -1,4 +1,5 @@
 use log::info;
+use minnow_lib::UpdateBatch;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
@@ -23,7 +24,6 @@ use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::Digest;
 use minnow_lib::utils::{C, D, F};
-use minnow_lib::CheckpointUpdates;
 
 pub struct TwoStepMinnowMTCircuits {
     pub base_circuit: BaseCircuit,
@@ -116,9 +116,9 @@ impl BaseCircuit {
         }
     }
 
-    pub fn apply_checkpoint_updates_and_set_inputs(
+    pub fn apply_update_batch_and_set_inputs(
         &self,
-        checkpoint_updates: &CheckpointUpdates,
+        update_batch: &UpdateBatch,
         zk_service_state: &mut MinnowMTServiceState,
         cur_checkpoint_head: &Digest,
     ) -> PartialWitness<F> {
@@ -132,7 +132,7 @@ impl BaseCircuit {
         pw.set_hash_target(self.inputs.in_checkpoint_head_t, *cur_checkpoint_head)
             .unwrap();
 
-        for (i, update) in checkpoint_updates.iter().flatten().enumerate() {
+        for (i, update) in update_batch.iter().enumerate() {
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.prev_targets[i], &update.id);
             zk_service_state.update_leaf(&update);
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.new_targets[i], &update.id);
@@ -294,8 +294,8 @@ mod tests {
 
     use crate::merkle::get_initial_root;
 
-    use minnow_lib::hash_commitment;
     use minnow_lib::utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest};
+    use minnow_lib::{flatten_checkpoint_updates, hash_commitment};
 
     use super::*;
     use hashbrown::HashMap;
@@ -316,8 +316,10 @@ mod tests {
         let old_num_leaves = zk_service_state.get_num_leaves();
         let old_root = zk_service_state.get_root();
 
-        let pw = circuit.apply_checkpoint_updates_and_set_inputs(
-            &checkpoint_updates,
+        let new_head = hash_commitment(&checkpoint_updates, batch_size, &old_head);
+        let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
+        let pw = circuit.apply_update_batch_and_set_inputs(
+            &flattened_updates,
             &mut zk_service_state,
             &old_head,
         );
@@ -342,7 +344,6 @@ mod tests {
             proof.public_inputs[6..10]
         );
         assert_eq!(old_head.elements, proof.public_inputs[10..14]);
-        let new_head = hash_commitment(&checkpoint_updates, batch_size, &old_head);
         assert_eq!(new_head.elements, proof.public_inputs[14..18]);
     }
 
@@ -373,10 +374,11 @@ mod tests {
 
         // Generate all base proofs
         for i in 0..num_checkpoints {
-            let sample_updates = &all_checkpoint_updates[i];
-
-            let pw = base_circuit.apply_checkpoint_updates_and_set_inputs(
-                sample_updates,
+            let sample_updates = all_checkpoint_updates[i].clone();
+            let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
+            let flattened_updates: Vec<_> = sample_updates.into_iter().flatten().collect();
+            let pw = base_circuit.apply_update_batch_and_set_inputs(
+                &flattened_updates,
                 &mut zk_service_state,
                 &cur_head,
             );
@@ -387,7 +389,7 @@ mod tests {
             println!("Base proof {} verified", i);
 
             // Update the head
-            cur_head = hash_commitment(sample_updates, batch_size, &cur_head);
+            cur_head = new_head;
             println!("Cur head: {:?}", cur_head);
         }
 

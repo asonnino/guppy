@@ -1,0 +1,22 @@
+cargo run --bin determine_max_updates --release 30
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running `/Users/saikrishnadeepakmaram/Desktop/minnow/target/release/determine_max_updates 30`
+Finding change point starting from 1 for 2**13 gates
+Degree: 1 14
+Degree: 2 14
+Degree: 3 15
+Changing target degree. Finding change point for 14 gates
+Change point: 2 14
+Finding change point starting from 6 for 2**15 gates
+Degree: 6 15
+Degree: 7 15
+Degree: 8 16
+Change point: 7 15
+Finding change point starting from 16 for 2**16 gates
+Degree: 16 16
+Degree: 17 17
+Change point: 16 16
+Finding change point starting from 34 for 2**17 gates
+Degree: 34 17
+Degree: 35 17
+Failed 3 times in a row. Exiting. Tried degree bits from 17 to 19

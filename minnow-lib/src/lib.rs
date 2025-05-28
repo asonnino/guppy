@@ -168,6 +168,10 @@ pub type UpdateBatch = Vec<StreamPoint>;
 // Each checkpoint contains a collection of batches.
 pub type CheckpointUpdates = Vec<UpdateBatch>;
 
+pub fn flatten_checkpoint_updates(updates: CheckpointUpdates) -> Vec<StreamPoint> {
+    updates.into_iter().flatten().collect::<Vec<_>>()
+}
+
 pub fn hash_commitment(
     updates: &CheckpointUpdates,
     batch_size: usize,

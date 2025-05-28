@@ -19,6 +19,8 @@ use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::Target;
 use plonky2::with_context;
 
+pub const DEFAULT_BATCH_SIZE: usize = 50;
+
 #[derive(Debug)]
 pub struct MinnowMTServiceState {
     pub merkle_tree: MerkleTree,
