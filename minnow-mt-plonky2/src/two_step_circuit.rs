@@ -299,14 +299,14 @@ mod tests {
         utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
     };
     use plonky2::{
-        field::{extension::Extendable, goldilocks_field::GoldilocksField},
-        hash::hash_types::RichField,
-        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+        field::goldilocks_field::GoldilocksField,
+        plonk::config::PoseidonGoldilocksConfig,
         recursion::{
             cyclic_recursion::check_cyclic_proof_verifier_data,
             dummy_circuit::cyclic_base_proof,
         },
     };
+    use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize};
     use tokio::sync::mpsc;
 
     use super::*;
@@ -421,35 +421,68 @@ mod tests {
 
     /// Simulates a multi-machine setup where the primary generates partial witnesses
     /// and sends them to the proxy provers, which then compute base proofs.
-    struct PartialWitnessMessage<F: Field> {
+    struct PartialWitnessMessage {
         index: u64,
-        witness: PartialWitness<F>,
+        witness: PartialWitness<GoldilocksField>,
+    }
+
+    impl Serialize for PartialWitnessMessage {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let mut state = serializer.serialize_struct("PartialWitnessMessage", 2)?;
+            state.serialize_field("index", &self.index)?;
+            let witness_map: &HashMap<Target, GoldilocksField> = &self.witness.target_values;
+            state.serialize_field("witness", witness_map)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for PartialWitnessMessage {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            #[derive(Deserialize)]
+            struct PartialWitnessMessageHelper {
+                index: u64,
+                witness: HashMap<Target, GoldilocksField>,
+            }
+
+            let helper = PartialWitnessMessageHelper::deserialize(deserializer)?;
+            Ok(PartialWitnessMessage {
+                index: helper.index,
+                witness: PartialWitness {
+                    target_values: helper.witness,
+                },
+            })
+        }
     }
 
     /// Simulates a multi-machine setup where the proxy prover sends back the base proof
     /// to the primary, which then computes the cyclic proof.
-    struct BaseProofMessage<
-        G: RichField + Extendable<D>,
-        C: GenericConfig<D, F = G>,
-        const D: usize,
-    > {
+    #[derive(Serialize, Deserialize)]
+    struct BaseProofMessage {
         index: u64,
-        proof: ProofWithPublicInputs<G, C, D>,
+        proof: ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>,
     }
 
     /// Spawns a task that simulates a proxy prover, which receives partial witnesses
     /// and computes base proofs.
     async fn spawn_proxy_prover(
-        mut rx: mpsc::Receiver<PartialWitnessMessage<GoldilocksField>>,
-        tx: mpsc::Sender<BaseProofMessage<GoldilocksField, PoseidonGoldilocksConfig, 2>>,
+        mut rx: mpsc::Receiver<Vec<u8>>,
+        tx: mpsc::Sender<Vec<u8>>,
         base_circuit: &BaseCircuit,
     ) {
-        while let Some(message) = rx.recv().await {
+        while let Some(serialized) = rx.recv().await {
+            let message = bincode::deserialize(&serialized).unwrap();
             let PartialWitnessMessage { index, witness } = message;
             let proof = base_circuit.circuit_data.prove(witness).unwrap();
             assert!(base_circuit.circuit_data.verify(proof.clone()).is_ok());
             let reply = BaseProofMessage { index, proof };
-            tx.send(reply).await.unwrap();
+            let reply_serialized = bincode::serialize(&reply).unwrap();
+            tx.send(reply_serialized).await.unwrap();
         }
     }
 
@@ -498,10 +531,11 @@ mod tests {
                     index: i as u64,
                     witness: pw,
                 };
+                let serialized = bincode::serialize(&message).unwrap();
                 if i % 2 == 0 {
-                    tx_proxy_1_pw.send(message).await.unwrap();
+                    tx_proxy_1_pw.send(serialized).await.unwrap();
                 } else {
-                    tx_proxy_2_pw.send(message).await.unwrap();
+                    tx_proxy_2_pw.send(serialized).await.unwrap();
                 }
 
                 cur_head = new_head;
@@ -539,7 +573,8 @@ mod tests {
                 cyclic_base_proof(&common_data, &verifier_data, HashMap::<usize, F>::new());
             let mut prev_proof = starter_proof;
 
-            'main: while let Some(message) = rx_cyclic_prover_pw.recv().await {
+            'main: while let Some(serialized) = rx_cyclic_prover_pw.recv().await {
+                let message = bincode::deserialize(&serialized).unwrap();
                 let BaseProofMessage { index, proof } = message;
                 tracing::info!("[primary] Received base proof message #{index:?}");
                 base_proofs.insert(index, proof);
