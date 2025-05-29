@@ -1,29 +1,29 @@
 use log::info;
-use minnow_lib::UpdateBatch;
-use plonky2::field::types::Field;
-use plonky2::hash::hash_types::HashOutTarget;
-use plonky2::iop::target::BoolTarget;
-use plonky2::iop::target::Target;
-use plonky2::iop::witness::PartialWitness;
-use plonky2::iop::witness::WitnessWrite;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::circuit_data::VerifierCircuitTarget;
-use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
-use plonky2::plonk::proof::ProofWithPublicInputs;
-use plonky2::plonk::proof::ProofWithPublicInputsTarget;
-use plonky2::with_context;
+use minnow_lib::{
+    utils::{common_data_for_recursion, print_system_info, CircuitInfo, Digest, C, D, F},
+    UpdateBatch,
+};
+use plonky2::{
+    field::types::Field,
+    hash::hash_types::HashOutTarget,
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{
+            CircuitConfig,
+            CircuitData,
+            VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
+        },
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
+    with_context,
+};
 
-use crate::merkle::MerkleProofTargets;
-use crate::process_many_batches;
-use crate::CircuitState;
-use crate::MinnowMTServiceState;
-use minnow_lib::utils::common_data_for_recursion;
-use minnow_lib::utils::print_system_info;
-use minnow_lib::utils::CircuitInfo;
-use minnow_lib::utils::Digest;
-use minnow_lib::utils::{C, D, F};
+use crate::{merkle::MerkleProofTargets, process_many_batches, CircuitState, MinnowMTServiceState};
 
 pub struct TwoStepMinnowMTCircuits {
     pub base_circuit: BaseCircuit,
@@ -292,16 +292,25 @@ impl CyclicSequentialCircuit {
 mod tests {
     use std::time::Instant;
 
-    use crate::merkle::get_initial_root;
-
-    use minnow_lib::utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest};
-    use minnow_lib::{flatten_checkpoint_updates, hash_commitment};
+    use hashbrown::HashMap;
+    use minnow_lib::{
+        flatten_checkpoint_updates,
+        hash_commitment,
+        utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
+    };
+    use plonky2::{
+        field::{extension::Extendable, goldilocks_field::GoldilocksField},
+        hash::hash_types::RichField,
+        plonk::config::{GenericConfig, PoseidonGoldilocksConfig},
+        recursion::{
+            cyclic_recursion::check_cyclic_proof_verifier_data,
+            dummy_circuit::cyclic_base_proof,
+        },
+    };
+    use tokio::sync::mpsc;
 
     use super::*;
-    use hashbrown::HashMap;
-    use plonky2::recursion::{
-        cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
-    };
+    use crate::merkle::get_initial_root;
 
     #[test]
     fn base_circuit_test() {
@@ -408,5 +417,168 @@ mod tests {
             info!("Cyclic proof {} verified", i);
             prev_proof = proof;
         }
+    }
+
+    /// Simulates a multi-machine setup where the primary generates partial witnesses
+    /// and sends them to the proxy provers, which then compute base proofs.
+    struct PartialWitnessMessage<F: Field> {
+        index: u64,
+        witness: PartialWitness<F>,
+    }
+
+    /// Simulates a multi-machine setup where the proxy prover sends back the base proof
+    /// to the primary, which then computes the cyclic proof.
+    struct BaseProofMessage<
+        G: RichField + Extendable<D>,
+        C: GenericConfig<D, F = G>,
+        const D: usize,
+    > {
+        index: u64,
+        proof: ProofWithPublicInputs<G, C, D>,
+    }
+
+    /// Spawns a task that simulates a proxy prover, which receives partial witnesses
+    /// and computes base proofs.
+    async fn spawn_proxy_prover(
+        mut rx: mpsc::Receiver<PartialWitnessMessage<GoldilocksField>>,
+        tx: mpsc::Sender<BaseProofMessage<GoldilocksField, PoseidonGoldilocksConfig, 2>>,
+        base_circuit: &BaseCircuit,
+    ) {
+        while let Some(message) = rx.recv().await {
+            let PartialWitnessMessage { index, witness } = message;
+            let proof = base_circuit.circuit_data.prove(witness).unwrap();
+            assert!(base_circuit.circuit_data.verify(proof.clone()).is_ok());
+            let reply = BaseProofMessage { index, proof };
+            tx.send(reply).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn multi_machine_simulation() {
+        let log_state_size = 2;
+        let num_batches_per_checkpoint = 3;
+        let batch_size = 2;
+        let num_checkpoints = 3;
+        let all_checkpoint_updates = generate_sample_checkpoint_updates(
+            num_checkpoints,
+            num_batches_per_checkpoint,
+            batch_size,
+        );
+
+        // Initialize the initial root and state for the primary
+        let initial_root = get_initial_root(log_state_size + 1);
+        let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
+        let base_circuit = BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
+        let circuit_data = &base_circuit.circuit_data;
+        let cyclic_circuit = CyclicSequentialCircuit::new(&initial_root, &circuit_data);
+        tracing::info!("Base circuit: {:?}", base_circuit.circuit_info);
+
+        // Channels for communication between tasks
+        let (tx_proxy_1_pw, rx_proxy_1_pw) = mpsc::channel(10);
+        let (tx_proxy_2_pw, rx_proxy_2_pw) = mpsc::channel(10);
+        let (tx_cyclic_prover_pw, mut rx_cyclic_prover_pw) = mpsc::channel(10);
+
+        // Running on the Primary: Generate all base proofs
+        let hasher_handle = tokio::spawn(async move {
+            let mut cur_head = Digest::ZERO;
+
+            for i in 0..num_checkpoints {
+                tracing::info!("[primary] Processing checkpoint {i}");
+                let sample_updates = all_checkpoint_updates[i].clone();
+                let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
+                let flattened_updates: Vec<_> = sample_updates.into_iter().flatten().collect();
+                let pw = base_circuit.apply_update_batch_and_set_inputs(
+                    &flattened_updates,
+                    &mut zk_service_state,
+                    &cur_head,
+                );
+
+                let message = PartialWitnessMessage {
+                    index: i as u64,
+                    witness: pw,
+                };
+                if i % 2 == 0 {
+                    tx_proxy_1_pw.send(message).await.unwrap();
+                } else {
+                    tx_proxy_2_pw.send(message).await.unwrap();
+                }
+
+                cur_head = new_head;
+            }
+
+            // Close the channels to signal completion
+            drop(tx_proxy_1_pw);
+            drop(tx_proxy_2_pw);
+            tracing::info!("[primary] Primary has sent all partial witnesses");
+        });
+
+        // Proxy: Compute the base proofs
+        let tx_cyclic_prover_1 = tx_cyclic_prover_pw.clone();
+        let proxy_1_handle = tokio::spawn(async move {
+            let base_circuit =
+                BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
+            spawn_proxy_prover(rx_proxy_1_pw, tx_cyclic_prover_1, &base_circuit).await;
+            tracing::info!("[proxy 1] Proxy 1 has completed its work");
+        });
+        let proxy_2_handle = tokio::spawn(async move {
+            let base_circuit =
+                BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
+            spawn_proxy_prover(rx_proxy_2_pw, tx_cyclic_prover_pw, &base_circuit).await;
+            tracing::info!("[proxy 2] Proxy 2 has completed its work");
+        });
+
+        // Primary: Compute the cyclic proofs
+        let cyclic_prover_handle = tokio::spawn(async move {
+            let mut next_index = 0;
+            let mut base_proofs = HashMap::new();
+
+            let verifier_data = &cyclic_circuit.circuit_data.verifier_only;
+            let common_data = &cyclic_circuit.circuit_data.common;
+            let starter_proof =
+                cyclic_base_proof(&common_data, &verifier_data, HashMap::<usize, F>::new());
+            let mut prev_proof = starter_proof;
+
+            'main: while let Some(message) = rx_cyclic_prover_pw.recv().await {
+                let BaseProofMessage { index, proof } = message;
+                tracing::info!("[primary] Received base proof message #{index:?}");
+                base_proofs.insert(index, proof);
+
+                loop {
+                    let base_proof = match base_proofs.get(&next_index) {
+                        Some(proof) => proof,
+                        None => {
+                            tracing::info!("Waiting for base proof {next_index}");
+                            continue 'main;
+                        }
+                    };
+
+                    let pw = cyclic_circuit.set_inputs(
+                        next_index == 0,
+                        &base_proof,
+                        &prev_proof,
+                        &verifier_data,
+                    );
+                    let proof = cyclic_circuit.circuit_data.prove(pw).unwrap();
+                    cyclic_circuit.circuit_data.verify(proof.clone()).unwrap();
+                    check_cyclic_proof_verifier_data(&proof, verifier_data, common_data).unwrap();
+
+                    tracing::info!("[primary] Cyclic proof #{next_index} verified");
+                    prev_proof = proof;
+                    next_index += 1;
+                    tracing::info!("[primary] Moving to next cyclic proof {next_index}");
+                }
+            }
+            tracing::info!("[primary] Cyclic prover has completed its work");
+        });
+
+        // Wait for all tasks to complete
+        futures::future::join_all(vec![
+            hasher_handle,
+            proxy_1_handle,
+            proxy_2_handle,
+            cyclic_prover_handle,
+        ])
+        .await;
     }
 }
