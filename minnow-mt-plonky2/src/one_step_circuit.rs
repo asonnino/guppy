@@ -1,5 +1,5 @@
 use log::debug;
-use minnow_lib::UpdateBatch;
+use minnow_lib::Bundle;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::PartialWitness;
@@ -24,11 +24,18 @@ use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::{Digest, C, D, F};
 
+pub struct MinnowMTOneStepCircuitConfig {
+    pub log_state_size: usize,
+    pub num_batches: usize,
+    pub batch_size: usize,
+}
+
 // Called Minnow-MT-A in the paper.
 pub struct MinnowMTOneStepCircuit {
     pub circuit_data: CircuitData<F, C, D>,
     pub private_inputs: PrivateInputs,
     pub circuit_info: CircuitInfo,
+    pub config: MinnowMTOneStepCircuitConfig,
 }
 
 pub struct PrivateInputs {
@@ -55,19 +62,29 @@ impl MinnowMTOneStepCircuit {
         build_circuit(state_size, num_batches, batch_size, degree_bits)
     }
 
-    pub fn apply_update_batch_and_set_inputs(
+    pub fn apply_bundle_and_compute_witness(
         &self,
         checkpoint_number: usize,
-        update_batch: &UpdateBatch,
+        bundle: &Bundle,
         zk_service_state: &mut MinnowMTServiceState,
         prev_proof: &ProofWithPublicInputs<F, C, D>,
         base_case: bool,
         verifier_data: &VerifierOnlyCircuitData<C, D>,
     ) -> PartialWitness<F> {
         debug!(
-            "apply_checkpoint_updates_and_set_witness: start ({})",
+            "apply_bundle_and_compute_witness: start ({})",
             checkpoint_number
         );
+
+        assert_eq!(
+            bundle.len(),
+            self.config.num_batches,
+            "Bundle size mismatch"
+        );
+        for batch in bundle {
+            assert_eq!(batch.len(), self.config.batch_size, "Batch size mismatch");
+        }
+
         let mut pw = PartialWitness::new();
         pw.set_bool_target(self.private_inputs.condition, !base_case)
             .unwrap();
@@ -79,7 +96,7 @@ impl MinnowMTOneStepCircuit {
         pw.set_verifier_data_target(&self.private_inputs.verifier_data_target, verifier_data)
             .unwrap();
 
-        for (i, update) in update_batch.iter().enumerate() {
+        for (i, update) in bundle.iter().flatten().enumerate() {
             zk_service_state.add_proof_targets(
                 &mut pw,
                 &self.private_inputs.prev_targets[i],
@@ -94,7 +111,7 @@ impl MinnowMTOneStepCircuit {
         }
 
         debug!(
-            "apply_checkpoint_updates_and_set_witness: end ({})",
+            "apply_bundle_and_compute_witness: end ({})",
             checkpoint_number
         );
         pw
@@ -232,6 +249,11 @@ fn build_circuit(
             num_gates,
             degree_bits,
         },
+        config: MinnowMTOneStepCircuitConfig {
+            log_state_size,
+            num_batches,
+            batch_size,
+        },
     }
 }
 
@@ -240,7 +262,7 @@ mod tests {
     use crate::DEFAULT_BATCH_SIZE;
 
     use super::*;
-    use minnow_lib::{flatten_checkpoint_updates, hash_commitment};
+    use minnow_lib::hash_commitment;
     use plonky2::field::types::Field;
     use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
     use plonky2::recursion::dummy_circuit::cyclic_base_proof;
@@ -293,10 +315,9 @@ mod tests {
         for c in 0..num_checkpoints {
             let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
             let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
-            let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
-            let pw = circuit.apply_update_batch_and_set_inputs(
+            let pw = circuit.apply_bundle_and_compute_witness(
                 c,
-                &flattened_updates,
+                &checkpoint_updates,
                 &mut zk_service_state,
                 &proof,
                 c == 0,

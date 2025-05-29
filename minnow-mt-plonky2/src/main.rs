@@ -1,8 +1,7 @@
 use hashbrown::HashMap;
-use minnow_lib::flatten_checkpoint_updates;
 use minnow_lib::hash_commitment;
 use minnow_lib::utils::generate_sample_updates;
-use minnow_lib::utils::init_logging;
+use minnow_lib::utils::set_log_level;
 use minnow_lib::utils::{Digest, F};
 use minnow_mt_plonky2::one_step_circuit::MinnowMTOneStepCircuit;
 use minnow_mt_plonky2::MinnowMTServiceState;
@@ -50,9 +49,9 @@ fn main() {
     let args = Args::parse();
     info!("{:?}", args);
     if args.debug {
-        init_logging(LevelFilter::Debug);
+        set_log_level(LevelFilter::Debug);
     } else {
-        init_logging(LevelFilter::Info);
+        set_log_level(LevelFilter::Info);
     }
 
     let log_state_size = args.log_state_size;
@@ -79,10 +78,9 @@ fn main() {
     for c in 0..num_checkpoints {
         let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
         let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
-        let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
-        let pw = circuit.apply_update_batch_and_set_inputs(
+        let pw = circuit.apply_bundle_and_compute_witness(
             c,
-            &flattened_updates,
+            &checkpoint_updates,
             &mut zk_service_state,
             &proof,
             c == 0,

@@ -1,7 +1,7 @@
 use log::info;
 use minnow_lib::{
     utils::{common_data_for_recursion, print_system_info, CircuitInfo, Digest, C, D, F},
-    UpdateBatch,
+    Bundle,
 };
 use plonky2::{
     field::types::Field,
@@ -13,10 +13,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig,
-            CircuitData,
-            VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
+            CircuitConfig, CircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -42,11 +39,18 @@ pub struct BaseOutputs {
     pub out_checkpoint_head_t: HashOutTarget,
 }
 
+pub struct BaseCircuitConfig {
+    pub log_state_size: usize,
+    pub num_batches: usize,
+    pub batch_size: usize,
+}
+
 pub struct BaseCircuit {
     pub circuit_info: CircuitInfo,
     pub circuit_data: CircuitData<F, C, D>,
     pub inputs: BaseInputs,
     pub outputs: BaseOutputs,
+    pub config: BaseCircuitConfig,
 }
 
 impl BaseCircuit {
@@ -113,15 +117,29 @@ impl BaseCircuit {
             circuit_data,
             inputs,
             outputs,
+            config: BaseCircuitConfig {
+                log_state_size,
+                num_batches,
+                batch_size,
+            },
         }
     }
 
-    pub fn apply_update_batch_and_set_inputs(
+    pub fn apply_bundle_and_compute_witness(
         &self,
-        update_batch: &UpdateBatch,
+        bundle: &Bundle,
         zk_service_state: &mut MinnowMTServiceState,
         cur_checkpoint_head: &Digest,
     ) -> PartialWitness<F> {
+        assert_eq!(
+            bundle.len(),
+            self.config.num_batches,
+            "Bundle size mismatch"
+        );
+        for batch in bundle {
+            assert_eq!(batch.len(), self.config.batch_size, "Batch size mismatch");
+        }
+
         let mut pw = PartialWitness::new();
 
         pw.set_target(
@@ -132,7 +150,7 @@ impl BaseCircuit {
         pw.set_hash_target(self.inputs.in_checkpoint_head_t, *cur_checkpoint_head)
             .unwrap();
 
-        for (i, update) in update_batch.iter().enumerate() {
+        for (i, update) in bundle.iter().flatten().enumerate() {
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.prev_targets[i], &update.id);
             zk_service_state.update_leaf(&update);
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.new_targets[i], &update.id);
@@ -294,7 +312,6 @@ mod tests {
 
     use hashbrown::HashMap;
     use minnow_lib::{
-        flatten_checkpoint_updates,
         hash_commitment,
         utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
     };
@@ -302,8 +319,7 @@ mod tests {
         field::goldilocks_field::GoldilocksField,
         plonk::config::PoseidonGoldilocksConfig,
         recursion::{
-            cyclic_recursion::check_cyclic_proof_verifier_data,
-            dummy_circuit::cyclic_base_proof,
+            cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
         },
     };
     use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize};
@@ -326,9 +342,8 @@ mod tests {
         let old_root = zk_service_state.get_root();
 
         let new_head = hash_commitment(&checkpoint_updates, batch_size, &old_head);
-        let flattened_updates = flatten_checkpoint_updates(checkpoint_updates);
-        let pw = circuit.apply_update_batch_and_set_inputs(
-            &flattened_updates,
+        let pw = circuit.apply_bundle_and_compute_witness(
+            &checkpoint_updates,
             &mut zk_service_state,
             &old_head,
         );
@@ -385,9 +400,8 @@ mod tests {
         for i in 0..num_checkpoints {
             let sample_updates = all_checkpoint_updates[i].clone();
             let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
-            let flattened_updates: Vec<_> = sample_updates.into_iter().flatten().collect();
-            let pw = base_circuit.apply_update_batch_and_set_inputs(
-                &flattened_updates,
+            let pw = base_circuit.apply_bundle_and_compute_witness(
+                &sample_updates,
                 &mut zk_service_state,
                 &cur_head,
             );
@@ -520,9 +534,8 @@ mod tests {
                 tracing::info!("[primary] Processing checkpoint {i}");
                 let sample_updates = all_checkpoint_updates[i].clone();
                 let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
-                let flattened_updates: Vec<_> = sample_updates.into_iter().flatten().collect();
-                let pw = base_circuit.apply_update_batch_and_set_inputs(
-                    &flattened_updates,
+                let pw = base_circuit.apply_bundle_and_compute_witness(
+                    &sample_updates,
                     &mut zk_service_state,
                     &cur_head,
                 );

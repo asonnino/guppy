@@ -5,7 +5,7 @@ use log::info;
 
 use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
 use minnow_h_plonky2::MinnowHServiceState;
-use minnow_lib::utils::{generate_sample_updates, init_logging};
+use minnow_lib::utils::{generate_sample_updates, set_log_level};
 use minnow_lib::utils::{Digest, C, D, F};
 use minnow_lib::{hash_commitment, CheckpointUpdates, StreamID};
 use plonky2::field::types::Field;
@@ -87,9 +87,9 @@ fn main() {
     let args = Args::parse();
     info!("{:?}", args);
     if args.debug {
-        init_logging(LevelFilter::Debug);
+        set_log_level(LevelFilter::Debug);
     } else {
-        init_logging(LevelFilter::Info);
+        set_log_level(LevelFilter::Info);
     }
 
     let num_checkpoint_updates = args.checkpoint_updates;

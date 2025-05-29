@@ -11,7 +11,7 @@ use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use log::info;
 
 use crate::CheckpointUpdates;
-use crate::{StreamPoint, UpdateBatch};
+use crate::{Bundle, StreamPoint};
 
 #[derive(Debug)]
 pub struct CircuitInfo {
@@ -19,7 +19,7 @@ pub struct CircuitInfo {
     pub degree_bits: usize,
 }
 
-pub fn init_logging(level: log::LevelFilter) {
+pub fn set_log_level(level: log::LevelFilter) {
     // Initialize logging
     let mut builder = env_logger::Builder::from_default_env();
     builder.format_timestamp(None);
@@ -75,10 +75,10 @@ pub fn generate_sample_checkpoint_updates(
 pub fn generate_sample_updates(
     num_batches: usize,
     batch_size: usize,
-) -> Vec<UpdateBatch> {
+) -> Bundle {
     let start_batch_number = 0;
     let mut all_updates = Vec::new();
-    let first_set: UpdateBatch = (0..batch_size)
+    let first_set: Vec<StreamPoint> = (0..batch_size)
         .map(|i| {
             StreamPoint::new_with_flag(
                 {
