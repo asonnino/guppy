@@ -315,18 +315,14 @@ mod tests {
         hash_commitment,
         utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
     };
-    use plonky2::{
-        field::goldilocks_field::GoldilocksField,
-        plonk::config::PoseidonGoldilocksConfig,
-        recursion::{
-            cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
-        },
+    use plonky2::recursion::{
+        cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
     };
-    use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize};
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::merkle::get_initial_root;
+    use crate::test_utils::PartialWitnessMessage;
+    use crate::{merkle::get_initial_root, test_utils::BaseProofMessage};
 
     #[test]
     fn base_circuit_test() {
@@ -433,73 +429,6 @@ mod tests {
         }
     }
 
-    /// Simulates a multi-machine setup where the primary generates partial witnesses
-    /// and sends them to the proxy provers, which then compute base proofs.
-    struct PartialWitnessMessage {
-        index: u64,
-        witness: PartialWitness<GoldilocksField>,
-    }
-
-    impl Serialize for PartialWitnessMessage {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            let mut state = serializer.serialize_struct("PartialWitnessMessage", 2)?;
-            state.serialize_field("index", &self.index)?;
-            let witness_map: &HashMap<Target, GoldilocksField> = &self.witness.target_values;
-            state.serialize_field("witness", witness_map)?;
-            state.end()
-        }
-    }
-
-    impl<'de> Deserialize<'de> for PartialWitnessMessage {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            #[derive(Deserialize)]
-            struct PartialWitnessMessageHelper {
-                index: u64,
-                witness: HashMap<Target, GoldilocksField>,
-            }
-
-            let helper = PartialWitnessMessageHelper::deserialize(deserializer)?;
-            Ok(PartialWitnessMessage {
-                index: helper.index,
-                witness: PartialWitness {
-                    target_values: helper.witness,
-                },
-            })
-        }
-    }
-
-    /// Simulates a multi-machine setup where the proxy prover sends back the base proof
-    /// to the primary, which then computes the cyclic proof.
-    #[derive(Serialize, Deserialize)]
-    struct BaseProofMessage {
-        index: u64,
-        proof: ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>,
-    }
-
-    /// Spawns a task that simulates a proxy prover, which receives partial witnesses
-    /// and computes base proofs.
-    async fn spawn_proxy_prover(
-        mut rx: mpsc::Receiver<Vec<u8>>,
-        tx: mpsc::Sender<Vec<u8>>,
-        base_circuit: &BaseCircuit,
-    ) {
-        while let Some(serialized) = rx.recv().await {
-            let message = bincode::deserialize(&serialized).unwrap();
-            let PartialWitnessMessage { index, witness } = message;
-            let proof = base_circuit.circuit_data.prove(witness).unwrap();
-            assert!(base_circuit.circuit_data.verify(proof.clone()).is_ok());
-            let reply = BaseProofMessage { index, proof };
-            let reply_serialized = bincode::serialize(&reply).unwrap();
-            tx.send(reply_serialized).await.unwrap();
-        }
-    }
-
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn multi_machine_simulation() {
@@ -565,13 +494,19 @@ mod tests {
         let proxy_1_handle = tokio::spawn(async move {
             let base_circuit =
                 BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
-            spawn_proxy_prover(rx_proxy_1_pw, tx_cyclic_prover_1, &base_circuit).await;
+            crate::test_utils::spawn_proxy_prover(rx_proxy_1_pw, tx_cyclic_prover_1, &base_circuit)
+                .await;
             tracing::info!("[proxy 1] Proxy 1 has completed its work");
         });
         let proxy_2_handle = tokio::spawn(async move {
             let base_circuit =
                 BaseCircuit::new(log_state_size, num_batches_per_checkpoint, batch_size);
-            spawn_proxy_prover(rx_proxy_2_pw, tx_cyclic_prover_pw, &base_circuit).await;
+            crate::test_utils::spawn_proxy_prover(
+                rx_proxy_2_pw,
+                tx_cyclic_prover_pw,
+                &base_circuit,
+            )
+            .await;
             tracing::info!("[proxy 2] Proxy 2 has completed its work");
         });
 

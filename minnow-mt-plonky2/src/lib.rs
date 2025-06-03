@@ -4,6 +4,8 @@ use merkle::add_merkle_proof_verification_to_circuit;
 use merkle::{MerkleProof, MerkleProofTargets, MerkleTree};
 
 pub mod one_step_circuit;
+#[cfg(test)]
+pub mod test_utils;
 pub mod three_step_circuit;
 pub mod two_step_circuit;
 
