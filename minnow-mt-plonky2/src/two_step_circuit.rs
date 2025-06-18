@@ -13,7 +13,10 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig, CircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
+            CircuitConfig,
+            CircuitData,
+            VerifierCircuitTarget,
+            VerifierOnlyCircuitData,
         },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -316,13 +319,16 @@ mod tests {
         utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
     };
     use plonky2::recursion::{
-        cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
+        cyclic_recursion::check_cyclic_proof_verifier_data,
+        dummy_circuit::cyclic_base_proof,
     };
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::test_utils::PartialWitnessMessage;
-    use crate::{merkle::get_initial_root, test_utils::BaseProofMessage};
+    use crate::{
+        merkle::get_initial_root,
+        test_utils::{BaseProofMessage, PartialWitnessMessage},
+    };
 
     #[test]
     fn base_circuit_test() {
