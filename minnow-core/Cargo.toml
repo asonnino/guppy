@@ -20,6 +20,9 @@ bytes = "1.10.1"
 dashmap = "6.1.0"
 axum = "0.8.4"
 prometheus = "0.14.0"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+clap = { version = "4.5.40", features = ["derive"] }
+serde_yaml = "0.9.34-deprecated"
 plonky2.workspace = true
 hashbrown.workspace = true
 serde.workspace = true

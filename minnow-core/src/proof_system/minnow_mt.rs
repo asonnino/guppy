@@ -69,6 +69,18 @@ pub struct ProverParameters {
     pub branching_factor: usize,
 }
 
+impl Default for ProverParameters {
+    fn default() -> Self {
+        Self {
+            log_state_size: 2,
+            num_batches_per_base_circuit: 3,
+            batch_size: 2,
+            total_compression_levels: 3,
+            branching_factor: 2,
+        }
+    }
+}
+
 impl ProverParameters {
     #[cfg(test)]
     pub fn new_for_tests() -> Self {

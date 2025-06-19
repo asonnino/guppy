@@ -14,12 +14,18 @@ pub struct ProverParameters {
     pub total_compression_levels: u16,
 }
 
-impl ProverParameters {
-    #[cfg(test)]
-    pub fn new_for_tests() -> Self {
+impl Default for ProverParameters {
+    fn default() -> Self {
         Self {
             total_compression_levels: 3,
         }
+    }
+}
+
+impl ProverParameters {
+    #[cfg(test)]
+    pub fn new_for_tests() -> Self {
+        Self::default()
     }
 
     pub fn build_provers(
