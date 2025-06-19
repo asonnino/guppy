@@ -10,9 +10,9 @@ use tokio::{
 };
 
 use crate::{
+    messages::ProofIndex,
     metrics::Metrics,
     proof_system::{CyclicProver, Proof},
-    ProofIndex,
 };
 
 pub struct CyclicProverDriver {

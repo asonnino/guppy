@@ -255,14 +255,18 @@ impl CyclicProver {
     }
 }
 
-#[cfg(test)]
-pub fn sample_state_updates() -> Vec<Vec<StateUpdate>> {
-    let parameters = ProverParameters::new_for_tests();
+pub fn generate_state_updates(parameters: &ProverParameters) -> Vec<Vec<StateUpdate>> {
     minnow_lib::utils::generate_sample_checkpoint_updates(
         parameters.num_batches_per_base_circuit,
         parameters.num_batches_per_base_circuit,
         parameters.batch_size,
     )
+}
+
+#[cfg(test)]
+pub fn sample_state_updates() -> Vec<Vec<StateUpdate>> {
+    let parameters = ProverParameters::new_for_tests();
+    generate_state_updates(&parameters)
 }
 
 #[cfg(test)]

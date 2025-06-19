@@ -5,6 +5,7 @@ use std::path::Path;
 
 use clap::Parser;
 use minnow_core::{
+    client::Client,
     config::{ImportExport, NodeConfig},
     networking,
     primary::node::PrimaryNode,
@@ -27,12 +28,18 @@ enum Operation {
     Primary {
         #[clap(long, value_name = "FILE")]
         config_path: String,
+
+        #[clap(long, default_value_t = 10, value_name = "LOAD")]
+        load: usize,
     },
     Proxy {
         #[clap(long, value_name = "FILE")]
         config_path: String,
     },
-    DryRun,
+    DryRun {
+        #[clap(long, default_value_t = 10, value_name = "LOAD")]
+        load: usize,
+    },
 }
 
 #[tokio::main]
@@ -44,9 +51,9 @@ async fn main() {
 
     let args = Args::parse();
     match args.operation {
-        Operation::Primary { config_path } => run_primary_node(config_path).await,
+        Operation::Primary { config_path, load } => run_primary_node(config_path, load).await,
         Operation::Proxy { config_path } => run_proxy_node(config_path).await,
-        Operation::DryRun => dry_run().await,
+        Operation::DryRun { load } => dry_run(load).await,
     }
 }
 
@@ -58,11 +65,13 @@ fn sink_output(mut rx_output: mpsc::Receiver<Proof>) {
     });
 }
 
-async fn run_primary_node(config_path: impl AsRef<Path>) {
+async fn run_primary_node(config_path: impl AsRef<Path>, load: usize) {
     let config = NodeConfig::load(&config_path).expect("Failed to load primary node configuration");
     let (tx_output, rx_output) = tokio::sync::mpsc::channel(1024);
     sink_output(rx_output);
-    PrimaryNode::start(config, tx_output).join().await;
+    let primary_handle = PrimaryNode::start(config.clone(), tx_output).join();
+    let client_handle = Client::new(config, load).run();
+    tokio::join!(primary_handle, client_handle);
 }
 
 async fn run_proxy_node(config_path: impl AsRef<Path>) {
@@ -70,7 +79,7 @@ async fn run_proxy_node(config_path: impl AsRef<Path>) {
     ProxyNode::start(config).join().await;
 }
 
-async fn dry_run() {
+async fn dry_run(load: usize) {
     tracing::info!("Deploying local testbed with 1 primary and 1 proxy node");
     let config = NodeConfig {
         client_server_address: networking::get_test_address(),
@@ -82,7 +91,11 @@ async fn dry_run() {
     let (tx_output, rx_output) = tokio::sync::mpsc::channel(1024);
     sink_output(rx_output);
     let primary_handle = PrimaryNode::start(config.clone(), tx_output).join();
-    let proxy_handle = ProxyNode::start(config).join();
+    let proxy_handle = ProxyNode::start(config.clone()).join();
 
-    tokio::join!(primary_handle, proxy_handle);
+    tokio::task::yield_now().await; // Ensure tasks are scheduled
+
+    let client_handle = Client::new(config, load).run();
+
+    tokio::join!(primary_handle, proxy_handle, client_handle);
 }

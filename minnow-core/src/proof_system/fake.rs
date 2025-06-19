@@ -73,6 +73,12 @@ impl CyclicProver {
     }
 }
 
+pub fn generate_state_updates(_parameters: &ProverParameters) -> Vec<Vec<StateUpdate>> {
+    (0..100_000)
+        .map(|i| vec![vec![i as u8; 32], vec![(i + 1) as u8; 32]])
+        .collect()
+}
+
 #[cfg(test)]
 pub fn sample_state_updates() -> Vec<Vec<StateUpdate>> {
     vec![

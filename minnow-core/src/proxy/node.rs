@@ -93,10 +93,10 @@ mod tests {
 
     use crate::{
         config::NodeConfig,
+        messages::ProtocolMessage,
         networking::server::NetworkServer,
         proof_system::ProverParameters,
         proxy::node::ProxyNode,
-        ProtocolMessage,
     };
 
     #[tokio::test]

@@ -9,11 +9,10 @@ use tokio::{
 };
 
 use crate::{
+    messages::{ProofIndex, ProtocolMessage},
     metrics::Metrics,
     primary::load_balancer::LoadBalancer,
     proof_system::{PartialWitnessBuilder, Proof, StateUpdate},
-    ProofIndex,
-    ProtocolMessage,
 };
 
 pub struct Dispatcher {

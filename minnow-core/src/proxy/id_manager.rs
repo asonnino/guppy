@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::{ProofIndex, ProtocolMessage};
+use crate::messages::{ProofIndex, ProtocolMessage};
 
 pub struct IdManager {
     map: BTreeMap<ProofIndex, Vec<ProtocolMessage>>,

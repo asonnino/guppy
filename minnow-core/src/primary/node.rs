@@ -208,7 +208,7 @@ mod tests {
     ) -> JoinHandle<Result<(), std::io::Error>> {
         // Create a network client to submit requests to the primary node
         let (tx_incoming, _rx_incoming) = mpsc::channel(1);
-        let (tx_outgoing, rx_outgoing) = mpsc::channel(1);
+        let (tx_outgoing, rx_outgoing) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let client_handle =
             NetworkClient::<(), _>::new(server_address, tx_incoming, rx_outgoing).spawn();
 

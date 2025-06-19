@@ -10,10 +10,10 @@ use tokio::{
 };
 
 use crate::{
+    messages::ProtocolMessage,
     metrics::Metrics,
     proof_system::{BasicProver, CompressProver},
     proxy::id_manager::IdManager,
-    ProtocolMessage,
 };
 
 pub struct ProverDriver {
