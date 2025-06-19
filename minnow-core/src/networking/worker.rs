@@ -19,6 +19,8 @@ use tokio::{
 
 /// A worker that handles a bidirectional connection with a peer.
 pub struct ConnectionWorker<I, O> {
+    /// The identifier of the worker, typically the peer's address.
+    id: String,
     /// The TCP stream.
     stream: TcpStream,
     /// The sender for messages received from the network.
@@ -38,8 +40,14 @@ where
     const MAX_BATCH_SIZE: usize = 16;
 
     /// Create a new worker.
-    pub fn new(stream: TcpStream, tx_incoming: Sender<I>, rx_outgoing: Receiver<O>) -> Self {
+    pub fn new(
+        id: String,
+        stream: TcpStream,
+        tx_incoming: Sender<I>,
+        rx_outgoing: Receiver<O>,
+    ) -> Self {
         Self {
+            id,
             stream,
             tx_incoming,
             rx_outgoing,
@@ -49,8 +57,10 @@ where
     /// Run the worker.
     pub async fn run(self) {
         let (reader, writer) = self.stream.into_split();
-        let read_stream_handle = Self::handle_read_stream(reader, self.tx_incoming).boxed();
-        let write_stream_handle = Self::handle_write_stream(writer, self.rx_outgoing).boxed();
+        let read_stream_handle =
+            Self::handle_read_stream(self.id.clone(), reader, self.tx_incoming).boxed();
+        let write_stream_handle =
+            Self::handle_write_stream(self.id, writer, self.rx_outgoing).boxed();
 
         let (read_result, write_result) = tokio::join!(read_stream_handle, write_stream_handle);
 
@@ -64,6 +74,7 @@ where
 
     /// Handle reading from the stream.
     async fn handle_read_stream(
+        id: String,
         mut reader: OwnedReadHalf,
         tx_incoming: Sender<I>,
     ) -> io::Result<()> {
@@ -75,7 +86,7 @@ where
             // Fill buffer in one syscall
             let n = reader.read_buf(&mut buffer).await?;
             if n == 0 {
-                tracing::info!("Connection closed by peer (EOF)");
+                tracing::info!("[{id}] Connection closed by peer (EOF)");
                 return Ok(());
             }
 
@@ -87,7 +98,10 @@ where
                 if size > Self::MAX_MESSAGE_SIZE {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Frame too large: {size} > {} (max)", Self::MAX_MESSAGE_SIZE),
+                        format!(
+                            "[{id}] Frame too large: {size} > {} (max)",
+                            Self::MAX_MESSAGE_SIZE
+                        ),
                     ));
                 }
                 if buffer.len() < offset + 4 + size {
@@ -108,15 +122,18 @@ where
             futures::stream::iter(frames.iter())
                 .for_each_concurrent(Some(Self::MAX_BATCH_SIZE), |frame| {
                     let tx = tx_incoming.clone();
+                    let id = id.clone();
                     async move {
                         match bincode::deserialize::<I>(&frame) {
                             Ok(item) => {
                                 if tx.send(item).await.is_err() {
-                                    tracing::warn!("Incoming channel closed, stopping reader");
+                                    tracing::warn!(
+                                        "[{id}] Incoming channel closed, stopping reader"
+                                    );
                                     return; // TODO: Return from the function entirely
                                 }
                             }
-                            Err(e) => tracing::error!("Deserialize error: {:?}", e),
+                            Err(e) => tracing::error!("[{id}] Deserialize error: {e:?}"),
                         }
                     }
                 })
@@ -126,6 +143,7 @@ where
 
     /// Handle writing from the stream.
     async fn handle_write_stream(
+        id: String,
         mut writer: OwnedWriteHalf,
         mut rx_outgoing: Receiver<O>,
     ) -> io::Result<()> {
@@ -139,7 +157,7 @@ where
 
             if num_received == 0 {
                 tracing::warn!(
-                    "Cannot receive transaction from application layer, stopping worker"
+                    "[{id}] Cannot receive transaction from application layer, stopping worker"
                 );
                 return Ok(());
             }

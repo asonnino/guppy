@@ -14,7 +14,7 @@ use crate::{
         dispatcher::Dispatcher,
         load_balancer::LoadBalancer,
     },
-    proof_system::{BasicProver, CompressProver, CyclicProof, CyclicProver, PartialWitnessBuilder},
+    proof_system::Proof,
     proxy::prover_driver::ProverDriver,
 };
 
@@ -30,7 +30,7 @@ pub struct PrimaryNode {
 }
 
 impl PrimaryNode {
-    pub fn start(config: NodeConfig, tx_output: Sender<CyclicProof>) -> Self {
+    pub fn start(config: NodeConfig, tx_output: Sender<Proof>) -> Self {
         let (tx_proxy_connections, rx_proxy_connections) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_client_connections, rx_client_connections) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_state_updates, rx_state_updates) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
@@ -38,10 +38,8 @@ impl PrimaryNode {
         let (tx_proxy_to_primary, rx_proxy_to_primary) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_cyclic_prover, rx_cyclic_prover) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let basic_prover = BasicProver {};
-        let partial_witness_builder = PartialWitnessBuilder {};
-        let compress_prover = CompressProver {};
-        let cyclic_prover = CyclicProver {};
+        let (partial_witness_builder, basic_prover, compress_prover, cyclic_prover) =
+            config.prover_parameters.build_provers();
 
         let load_balancer = LoadBalancer::new(tx_local_proxy);
         let dispatcher_handle = Dispatcher::new(
@@ -59,7 +57,7 @@ impl PrimaryNode {
             tx_proxy_to_primary.clone(),
             basic_prover,
             compress_prover,
-            config.max_compression_level,
+            config.prover_parameters.total_compression_levels,
         )
         .spawn();
 
@@ -133,14 +131,16 @@ impl PrimaryNode {
 #[cfg(test)]
 mod tests {
 
-    use std::time::Duration;
+    use std::{net::SocketAddr, time::Duration};
 
-    use tokio::sync::mpsc;
+    use tokio::{sync::mpsc, task::JoinHandle};
 
     use crate::{
         config::NodeConfig,
-        networking::client::NetworkClient,
-        primary::node::PrimaryNode,
+        networking::{self, client::NetworkClient},
+        primary::node::{PrimaryNode, DEFAULT_CHANNEL_SIZE},
+        proof_system::{ProverParameters, StateUpdate},
+        proxy::node::ProxyNode,
     };
 
     #[tokio::test]
@@ -149,7 +149,7 @@ mod tests {
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
-            max_compression_level: 3,
+            prover_parameters: ProverParameters::new_for_tests(),
         };
 
         // Start the primary node with the given configuration
@@ -167,12 +167,67 @@ mod tests {
         let total_requests = 100;
         for i in 0..total_requests {
             let state_update = vec![i; 32];
-            tx_outgoing.send(state_update).await.unwrap();
+            tx_outgoing.send(vec![state_update]).await.unwrap();
         }
 
         // Wait for all requests to be processed
         tokio::time::timeout(Duration::from_millis(100), async move {
             for _ in 0..total_requests {
+                let _ = rx_output.recv().await.unwrap();
+            }
+        })
+        .await
+        .expect("Timed out waiting for output");
+    }
+
+    async fn client(
+        server_address: SocketAddr,
+        state_updates: Vec<Vec<StateUpdate>>,
+    ) -> JoinHandle<Result<(), std::io::Error>> {
+        // Create a network client to submit requests to the primary node
+        let (tx_incoming, _rx_incoming) = mpsc::channel(1);
+        let (tx_outgoing, rx_outgoing) = mpsc::channel(1);
+        let client_handle =
+            NetworkClient::<(), _>::new(server_address, tx_incoming, rx_outgoing).spawn();
+
+        for update in state_updates {
+            tx_outgoing.send(update).await.unwrap();
+        }
+
+        client_handle
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn end_to_end() {
+        // Setup the configuration for the proxy node
+        let config = NodeConfig {
+            client_server_address: networking::get_test_address(),
+            proxy_server_address: networking::get_test_address(),
+            prover_parameters: ProverParameters {
+                total_compression_levels: 3,
+                ..ProverParameters::new_for_tests()
+            },
+        };
+
+        // Start the proxy nodes
+        let _proxy_node_1 = ProxyNode::start(config.clone());
+        let _proxy_node_2 = ProxyNode::start(config.clone());
+        tokio::task::yield_now().await;
+
+        // Start the primary node
+        let (tx_output, mut rx_output) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+        let _primary_node = PrimaryNode::start(config.clone(), tx_output);
+        tokio::task::yield_now().await;
+
+        // Start the client
+        let state_updates = crate::proof_system::sample_state_updates();
+        let total_state_updates = state_updates.len();
+        let _client_handle = client(config.client_server_address, state_updates).await;
+
+        // Wait for all requests to be processed
+        tokio::time::timeout(Duration::from_millis(100), async move {
+            for _ in 0..total_state_updates {
                 let _ = rx_output.recv().await.unwrap();
             }
         })

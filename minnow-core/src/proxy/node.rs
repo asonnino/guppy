@@ -9,7 +9,6 @@ use tokio::{
 use crate::{
     config::NodeConfig,
     networking::client::NetworkClient,
-    proof_system::{BasicProver, CompressProver},
     proxy::prover_driver::ProverDriver,
 };
 
@@ -25,15 +24,14 @@ impl ProxyNode {
         let (tx_primary_to_proxy, rx_primary_to_proxy) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_proxy_to_primary, rx_proxy_to_primary) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let basic_prover = BasicProver {};
-        let compress_prover = CompressProver {};
+        let (_, basic_prover, compress_prover, _) = config.prover_parameters.build_provers();
 
         let prover_driver_handle = ProverDriver::new(
             rx_primary_to_proxy,
             tx_proxy_to_primary,
             basic_prover,
             compress_prover,
-            config.max_compression_level,
+            config.prover_parameters.total_compression_levels,
         )
         .spawn();
 
@@ -76,6 +74,7 @@ mod tests {
     use crate::{
         config::NodeConfig,
         networking::server::NetworkServer,
+        proof_system::ProverParameters,
         proxy::node::ProxyNode,
         ProtocolMessage,
     };
@@ -86,7 +85,10 @@ mod tests {
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
-            max_compression_level: 3,
+            prover_parameters: ProverParameters {
+                total_compression_levels: 3,
+                ..ProverParameters::new_for_tests()
+            },
         };
         println!("Starting proxy node with config: {config:?}");
 
@@ -105,7 +107,7 @@ mod tests {
             for i in 0..total_base_proofs {
                 let message = ProtocolMessage::BasicProofMaterial {
                     index: i,
-                    material: vec![7; 100], // Example material
+                    material: crate::proof_system::sample_partial_witness(),
                 };
                 tx.send(message).await.unwrap();
             }
@@ -118,11 +120,12 @@ mod tests {
                     ProtocolMessage::PartialCompressionProof {
                         index,
                         compression_level,
-                        proof,
+                        ..
                     } => {
                         tracing::info!("Received partial proof for index {index}");
-                        assert!(compression_level <= config.max_compression_level);
-                        assert!(!proof.is_empty());
+                        assert!(
+                            compression_level <= config.prover_parameters.total_compression_levels
+                        );
                         assert_eq!(index, next_expected_index);
                         next_expected_index += 1;
                         if next_expected_index == total_base_proofs {
@@ -154,7 +157,10 @@ mod tests {
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
-            max_compression_level: 3,
+            prover_parameters: ProverParameters {
+                total_compression_levels: 3,
+                ..ProverParameters::new_for_tests()
+            },
         };
         println!("Starting proxy node with config: {config:?}");
 
@@ -173,8 +179,8 @@ mod tests {
             for i in 0..total_base_proofs {
                 let message = ProtocolMessage::PartialCompressionProof {
                     index: i,
-                    compression_level: config.max_compression_level - 1,
-                    proof: vec![7; 100], // Example material
+                    compression_level: config.prover_parameters.total_compression_levels - 1,
+                    proof: crate::proof_system::sample_proof(),
                 };
                 tx.send(message).await.unwrap();
             }
@@ -184,9 +190,8 @@ mod tests {
             let mut next_expected_index = 0;
             while let Some(reply) = rx_incoming.recv().await {
                 match reply {
-                    ProtocolMessage::FinalCompressionProof { index, proof } => {
+                    ProtocolMessage::FinalCompressionProof { index, .. } => {
                         tracing::info!("Received final proof for index {index}");
-                        assert!(!proof.is_empty());
                         assert_eq!(index, next_expected_index);
                         next_expected_index += 1;
                         if next_expected_index == total_base_proofs {

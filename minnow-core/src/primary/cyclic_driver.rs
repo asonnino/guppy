@@ -5,22 +5,22 @@ use dashmap::DashMap;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{
-    proof_system::{BasicProof, CyclicProof, CyclicProver},
+    proof_system::{CyclicProver, Proof},
     ProofIndex,
 };
 
 pub struct CyclicProverDriver {
-    rx_cyclic_prover: Receiver<(ProofIndex, BasicProof)>,
-    tx_output: Sender<CyclicProof>,
+    rx_cyclic_prover: Receiver<(ProofIndex, Proof)>,
+    tx_output: Sender<Proof>,
     state: CyclicProver,
-    pending: DashMap<ProofIndex, BasicProof>,
+    pending: DashMap<ProofIndex, Proof>,
     next_index: ProofIndex,
 }
 
 impl CyclicProverDriver {
     pub fn new(
-        rx_cyclic_prover: Receiver<(ProofIndex, BasicProof)>,
-        tx_output: Sender<CyclicProof>,
+        rx_cyclic_prover: Receiver<(ProofIndex, Proof)>,
+        tx_output: Sender<Proof>,
         state: CyclicProver,
     ) -> Self {
         Self {

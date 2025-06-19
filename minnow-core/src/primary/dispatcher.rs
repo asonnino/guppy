@@ -5,16 +5,16 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{
     primary::load_balancer::LoadBalancer,
-    proof_system::{BasicProof, PartialWitnessBuilder, StateUpdate},
+    proof_system::{PartialWitnessBuilder, Proof, StateUpdate},
     ProofIndex,
     ProtocolMessage,
 };
 
 pub struct Dispatcher {
     rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
-    rx_state_updates: Receiver<StateUpdate>,
+    rx_state_updates: Receiver<Vec<StateUpdate>>,
     rx_proxy_to_primary: Receiver<ProtocolMessage>,
-    tx_cyclic_prover: Sender<(ProofIndex, BasicProof)>,
+    tx_cyclic_prover: Sender<(ProofIndex, Proof)>,
     load_balancer: LoadBalancer<ProtocolMessage>,
     partial_witness_builder: PartialWitnessBuilder,
     index: ProofIndex,
@@ -23,9 +23,9 @@ pub struct Dispatcher {
 impl Dispatcher {
     pub fn new(
         rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
-        rx_state_updates: Receiver<StateUpdate>,
+        rx_state_updates: Receiver<Vec<StateUpdate>>,
         rx_proxy_to_primary: Receiver<ProtocolMessage>,
-        tx_cyclic_prover: Sender<(ProofIndex, BasicProof)>,
+        tx_cyclic_prover: Sender<(ProofIndex, Proof)>,
         load_balancer: LoadBalancer<ProtocolMessage>,
         partial_witness_builder: PartialWitnessBuilder,
     ) -> Self {
@@ -47,9 +47,9 @@ impl Dispatcher {
                     tracing::info!("Received new proxy connection, adding to load balancer");
                     self.load_balancer.add_proxy(connection);
                 },
-                Some(update) = self.rx_state_updates.recv() => {
+                Some(updates) = self.rx_state_updates.recv() => {
                     tracing::info!("Received state update, building proof material");
-                    let material = self.partial_witness_builder.build(update);
+                    let material = self.partial_witness_builder.build(updates);
                     let message = ProtocolMessage::BasicProofMaterial { index: self.index, material };
                     self.index += 1;
 

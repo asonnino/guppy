@@ -56,8 +56,9 @@ where
             tracing::info!("Accepted connection from client {peer}");
 
             // Spawn a worker to handle the connection.
+            let id = format!("server-worker-{peer}");
             let (tx, rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
-            let worker = ConnectionWorker::new(stream, self.tx_incoming.clone(), rx);
+            let worker = ConnectionWorker::new(id, stream, self.tx_incoming.clone(), rx);
             let _ = worker.spawn();
 
             // Notify the application layer that a new client has connected.

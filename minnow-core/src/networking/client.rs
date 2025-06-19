@@ -63,7 +63,8 @@ where
         };
         tracing::info!("Connected to {}", self.server_address);
 
-        let worker = ConnectionWorker::new(stream, self.tx_incoming, self.rx_outgoing);
+        let id = format!("client-worker-{}", self.server_address);
+        let worker = ConnectionWorker::new(id, stream, self.tx_incoming, self.rx_outgoing);
         worker.run().await;
         Ok(())
     }

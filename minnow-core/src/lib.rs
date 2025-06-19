@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::proof_system::PartialWitness;
+use crate::proof_system::{PartialWitness, Proof};
 
 pub mod config;
 pub mod networking;
@@ -22,11 +22,11 @@ pub enum ProtocolMessage {
     PartialCompressionProof {
         index: ProofIndex,
         compression_level: u16,
-        proof: Vec<u8>,
+        proof: Proof,
     },
     FinalCompressionProof {
         index: ProofIndex,
-        proof: Vec<u8>,
+        proof: Proof,
     },
 }
 

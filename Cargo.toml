@@ -16,3 +16,4 @@ hashbrown = "0.14.3"
 # Workspace dependencies below
 minnow-lib = { path = "minnow-lib" }
 minnow-mt-plonky2 = { path = "minnow-mt-plonky2" }
+serde = { version = "1.0.219", features = ["derive"] }

@@ -1,12 +1,16 @@
 pub mod utils;
 
-use plonky2::hash::hash_types::HashOutTarget;
+use plonky2::{
+    field::types::Field,
+    hash::hash_types::HashOutTarget,
+    iop::{
+        target::{BoolTarget, Target},
+        witness::WitnessWrite,
+    },
+    plonk::config::Hasher,
+};
+use serde::{Deserialize, Serialize};
 use utils::{Digest, MyCircuitBuilder as CircuitBuilder, MyPartialWitness as PartialWitness, F, H};
-
-use plonky2::field::types::Field;
-use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::WitnessWrite;
-use plonky2::plonk::config::Hasher;
 
 pub const STREAM_VAL_LEN: usize = 32;
 pub const STREAM_ID_LEN: usize = 32;
@@ -17,7 +21,7 @@ pub const STREAM_POINT_LEN: usize = STREAM_VAL_LEN + STREAM_ID_LEN + NEW_FLAG_LE
 pub type StreamVal = [u8; STREAM_VAL_LEN];
 pub type StreamID = [u8; STREAM_ID_LEN];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamPoint {
     pub id: StreamID,
     pub digest: StreamVal,
@@ -171,7 +175,7 @@ pub type Bundle = Vec<Vec<StreamPoint>>;
 pub fn hash_commitment(
     updates: &CheckpointUpdates,
     batch_size: usize,
-    prev_head: &Digest
+    prev_head: &Digest,
 ) -> Digest {
     let mut batch_commitments = Vec::new();
 
