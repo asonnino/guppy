@@ -11,5 +11,6 @@ use crate::proof_system::ProverParameters;
 pub struct NodeConfig {
     pub proxy_server_address: SocketAddr,
     pub client_server_address: SocketAddr,
+    pub metrics_server_address: SocketAddr,
     pub prover_parameters: ProverParameters,
 }

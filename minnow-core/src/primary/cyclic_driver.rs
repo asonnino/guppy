@@ -1,15 +1,22 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use dashmap::DashMap;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    time::Instant,
+};
 
 use crate::{
+    metrics::Metrics,
     proof_system::{CyclicProver, Proof},
     ProofIndex,
 };
 
 pub struct CyclicProverDriver {
+    metrics: Arc<Metrics>,
     rx_cyclic_prover: Receiver<(ProofIndex, Proof)>,
     tx_output: Sender<Proof>,
     state: CyclicProver,
@@ -19,11 +26,13 @@ pub struct CyclicProverDriver {
 
 impl CyclicProverDriver {
     pub fn new(
+        metrics: Arc<Metrics>,
         rx_cyclic_prover: Receiver<(ProofIndex, Proof)>,
         tx_output: Sender<Proof>,
         state: CyclicProver,
     ) -> Self {
         Self {
+            metrics,
             rx_cyclic_prover,
             tx_output,
             state,
@@ -40,7 +49,12 @@ impl CyclicProverDriver {
                 let Some((_, material)) = self.pending.remove(&self.next_index) else {
                     break;
                 };
+
+                let start = Instant::now();
                 let proof = self.state.prove(material);
+                let elapsed = start.elapsed();
+                self.metrics.observe_cyclic_prover_latency(elapsed);
+
                 tracing::info!("Cyclic proof generated for index {}", self.next_index);
                 self.next_index += 1;
                 let _ = self.tx_output.send(proof).await;

@@ -1,9 +1,15 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    time::Instant,
+};
 
 use crate::{
+    metrics::Metrics,
     primary::load_balancer::LoadBalancer,
     proof_system::{PartialWitnessBuilder, Proof, StateUpdate},
     ProofIndex,
@@ -11,6 +17,7 @@ use crate::{
 };
 
 pub struct Dispatcher {
+    metrics: Arc<Metrics>,
     rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
     rx_state_updates: Receiver<Vec<StateUpdate>>,
     rx_proxy_to_primary: Receiver<ProtocolMessage>,
@@ -22,6 +29,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     pub fn new(
+        metrics: Arc<Metrics>,
         rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
         rx_state_updates: Receiver<Vec<StateUpdate>>,
         rx_proxy_to_primary: Receiver<ProtocolMessage>,
@@ -30,6 +38,7 @@ impl Dispatcher {
         partial_witness_builder: PartialWitnessBuilder,
     ) -> Self {
         Self {
+            metrics,
             rx_proxy_connections,
             rx_state_updates,
             rx_proxy_to_primary,
@@ -48,8 +57,12 @@ impl Dispatcher {
                     self.load_balancer.add_proxy(connection);
                 },
                 Some(updates) = self.rx_state_updates.recv() => {
-                    tracing::info!("Received state update, building proof material");
+                    tracing::debug!("Received state update, building proof material");
+                    let start = Instant::now();
                     let material = self.partial_witness_builder.build(updates);
+                    let elapsed = start.elapsed();
+                    self.metrics.observe_partial_witness_builder_latency(elapsed);
+
                     let message = ProtocolMessage::BasicProofMaterial { index: self.index, material };
                     self.index += 1;
 
@@ -61,14 +74,14 @@ impl Dispatcher {
                     // TODO: Avoid deserializing and re-serializing PartialCompressionProof only to re-forward them.
                     match message {
                         ProtocolMessage::PartialCompressionProof { .. } => {
-                            tracing::info!("Received partial compression proof, forwarding to load balancer");
+                            tracing::debug!("Received partial compression proof, forwarding to load balancer");
                             if self.load_balancer.send(message).await.is_err() {
                                 break
                             }
 
                         }
                         ProtocolMessage::FinalCompressionProof{index, proof} => {
-                            tracing::info!("Received final compression proof for index {index}, forwarding to cyclic prover");
+                            tracing::debug!("Received final compression proof for index {index}, forwarding to cyclic prover");
                             if self.tx_cyclic_prover.send((index,proof)).await.is_err() {
                                 break;
                             }

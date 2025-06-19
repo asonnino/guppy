@@ -1,18 +1,23 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
+    time::Instant,
 };
 
 use crate::{
+    metrics::Metrics,
     proof_system::{BasicProver, CompressProver},
     proxy::id_manager::IdManager,
     ProtocolMessage,
 };
 
 pub struct ProverDriver {
+    metrics: Arc<Metrics>,
     rx_primary_to_proxy: Receiver<ProtocolMessage>,
     tx_primary: Sender<ProtocolMessage>,
     basic_prover: BasicProver,
@@ -23,6 +28,7 @@ pub struct ProverDriver {
 
 impl ProverDriver {
     pub fn new(
+        metrics: Arc<Metrics>,
         rx_primary_to_proxy: Receiver<ProtocolMessage>,
         tx_primary: Sender<ProtocolMessage>,
         basic_prover: BasicProver,
@@ -30,6 +36,7 @@ impl ProverDriver {
         max_compression_level: u16,
     ) -> Self {
         Self {
+            metrics,
             rx_primary_to_proxy,
             tx_primary,
             basic_prover,
@@ -41,12 +48,14 @@ impl ProverDriver {
 
     pub async fn run(&mut self) {
         while let Some(message) = self.rx_primary_to_proxy.recv().await {
+            tracing::debug!("Received message for prover: {message:?}");
             self.pending.insert(message);
 
             loop {
                 let Some(lowest) = self.pending.pop_lowest() else {
                     break;
                 };
+
                 let reply = self.build_proof(lowest).await;
                 if self.tx_primary.send(reply).await.is_err() {
                     return;
@@ -58,7 +67,11 @@ impl ProverDriver {
     async fn build_proof(&mut self, message: ProtocolMessage) -> ProtocolMessage {
         match message {
             ProtocolMessage::BasicProofMaterial { index, material } => {
+                let start = Instant::now();
                 let proof = self.basic_prover.prove(material);
+                let elapsed = start.elapsed();
+                self.metrics.observe_basic_prover_latency(elapsed);
+
                 ProtocolMessage::PartialCompressionProof {
                     index,
                     compression_level: 0,
@@ -70,7 +83,11 @@ impl ProverDriver {
                 compression_level,
                 proof,
             } => {
+                let start = Instant::now();
                 let proof = self.compress_prover.prove(proof, compression_level);
+                let elapsed = start.elapsed();
+                self.metrics.observe_compress_prover_latency(elapsed);
+
                 if compression_level < self.max_compression_level {
                     ProtocolMessage::PartialCompressionProof {
                         index,
@@ -78,6 +95,7 @@ impl ProverDriver {
                         proof,
                     }
                 } else {
+                    tracing::debug!("Final compression proof for index {index} with compression level {compression_level}");
                     ProtocolMessage::FinalCompressionProof { index, proof }
                 }
             }

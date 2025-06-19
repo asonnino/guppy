@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::proof_system::{PartialWitness, Proof};
 
 pub mod config;
+pub mod metrics;
 pub mod networking;
 pub mod primary;
 pub mod proof_system;

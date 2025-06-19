@@ -1,6 +1,8 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use tokio::{
     sync::mpsc::{self},
     task::JoinHandle,
@@ -8,6 +10,7 @@ use tokio::{
 
 use crate::{
     config::NodeConfig,
+    metrics::Metrics,
     networking::client::NetworkClient,
     proxy::prover_driver::ProverDriver,
 };
@@ -17,16 +20,21 @@ pub const DEFAULT_CHANNEL_SIZE: usize = 100_000;
 pub struct ProxyNode {
     prover_driver_handle: JoinHandle<()>,
     network_client_handle: JoinHandle<std::io::Result<()>>,
+    metrics_server_handle: JoinHandle<Result<(), std::io::Error>>,
 }
 
 impl ProxyNode {
     pub fn start(config: NodeConfig) -> Self {
+        let registry = prometheus::Registry::new();
+        let metrics = Arc::new(Metrics::new(&registry));
+
         let (tx_primary_to_proxy, rx_primary_to_proxy) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_proxy_to_primary, rx_proxy_to_primary) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
         let (_, basic_prover, compress_prover, _) = config.prover_parameters.build_provers();
 
         let prover_driver_handle = ProverDriver::new(
+            metrics,
             rx_primary_to_proxy,
             tx_proxy_to_primary,
             basic_prover,
@@ -42,16 +50,23 @@ impl ProxyNode {
         )
         .spawn();
 
+        let metrics_server_handle =
+            crate::metrics::start_prometheus_server(config.metrics_server_address, &registry);
+
         tracing::info!("Proxy node started with config: {config:?}");
         Self {
             prover_driver_handle,
             network_client_handle,
+            metrics_server_handle,
         }
     }
 
     pub async fn join(self) {
-        let (prover_driver_result, network_client_result) =
-            tokio::join!(self.prover_driver_handle, self.network_client_handle,);
+        let (prover_driver_result, network_client_result, metrics_server_result) = tokio::join!(
+            self.prover_driver_handle,
+            self.network_client_handle,
+            self.metrics_server_handle
+        );
 
         if let Err(e) = prover_driver_result {
             tracing::error!("Prover Driver task failed: {e:?}");
@@ -59,6 +74,11 @@ impl ProxyNode {
         match network_client_result {
             Ok(Err(e)) => tracing::error!("Proxy network error: {e:?}"),
             Err(e) => tracing::error!("Proxy server task failed: {e:?}"),
+            _ => (),
+        }
+        match metrics_server_result {
+            Ok(Err(e)) => tracing::error!("Metrics server error: {e:?}"),
+            Err(e) => tracing::error!("Metrics server task failed: {e:?}"),
             _ => (),
         }
     }
@@ -85,6 +105,7 @@ mod tests {
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
+            metrics_server_address: crate::networking::get_test_address(),
             prover_parameters: ProverParameters {
                 total_compression_levels: 3,
                 ..ProverParameters::new_for_tests()
@@ -157,6 +178,7 @@ mod tests {
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
+            metrics_server_address: crate::networking::get_test_address(),
             prover_parameters: ProverParameters {
                 total_compression_levels: 3,
                 ..ProverParameters::new_for_tests()

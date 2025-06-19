@@ -1,6 +1,8 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -8,6 +10,7 @@ use tokio::{
 
 use crate::{
     config::NodeConfig,
+    metrics::Metrics,
     networking::server::NetworkServer,
     primary::{
         cyclic_driver::CyclicProverDriver,
@@ -26,11 +29,15 @@ pub struct PrimaryNode {
     cyclic_prover_handle: JoinHandle<()>,
     proxy_server_handle: JoinHandle<std::io::Result<()>>,
     client_server_handle: JoinHandle<std::io::Result<()>>,
+    metrics_server_handle: JoinHandle<Result<(), std::io::Error>>,
     rx_client_connections: Receiver<Sender<()>>,
 }
 
 impl PrimaryNode {
     pub fn start(config: NodeConfig, tx_output: Sender<Proof>) -> Self {
+        let registry = prometheus::Registry::new();
+        let metrics = Arc::new(Metrics::new(&registry));
+
         let (tx_proxy_connections, rx_proxy_connections) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_client_connections, rx_client_connections) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_state_updates, rx_state_updates) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
@@ -43,6 +50,7 @@ impl PrimaryNode {
 
         let load_balancer = LoadBalancer::new(tx_local_proxy);
         let dispatcher_handle = Dispatcher::new(
+            metrics.clone(),
             rx_proxy_connections,
             rx_state_updates,
             rx_proxy_to_primary,
@@ -53,6 +61,7 @@ impl PrimaryNode {
         .spawn();
 
         let prover_driver_handle = ProverDriver::new(
+            metrics.clone(),
             rx_local_proxy,
             tx_proxy_to_primary.clone(),
             basic_prover,
@@ -62,7 +71,7 @@ impl PrimaryNode {
         .spawn();
 
         let cyclic_prover_handle =
-            CyclicProverDriver::new(rx_cyclic_prover, tx_output, cyclic_prover).spawn();
+            CyclicProverDriver::new(metrics, rx_cyclic_prover, tx_output, cyclic_prover).spawn();
 
         let proxy_server_handle = NetworkServer::new(
             config.proxy_server_address,
@@ -78,6 +87,9 @@ impl PrimaryNode {
         )
         .spawn();
 
+        let metrics_server_handle =
+            crate::metrics::start_prometheus_server(config.metrics_server_address, &registry);
+
         tracing::info!("Primary node started with config: {config:?}");
         Self {
             dispatcher_handle,
@@ -85,6 +97,7 @@ impl PrimaryNode {
             cyclic_prover_handle,
             proxy_server_handle,
             client_server_handle,
+            metrics_server_handle,
             rx_client_connections,
         }
     }
@@ -96,6 +109,7 @@ impl PrimaryNode {
             cyclic_prover_result,
             proxy_server_result,
             client_server_result,
+            metrics_server_result,
             _,
         ) = tokio::join!(
             self.dispatcher_handle,
@@ -103,6 +117,7 @@ impl PrimaryNode {
             self.cyclic_prover_handle,
             self.proxy_server_handle,
             self.client_server_handle,
+            self.metrics_server_handle,
             async move { while self.rx_client_connections.recv().await.is_some() {} }
         );
 
@@ -115,6 +130,7 @@ impl PrimaryNode {
         if let Err(e) = cyclic_prover_result {
             tracing::error!("Cyclic prover task failed: {e:?}");
         }
+
         match proxy_server_result {
             Ok(Err(e)) => tracing::error!("Proxy network error: {e:?}"),
             Err(e) => tracing::error!("Proxy server task failed: {e:?}"),
@@ -123,6 +139,11 @@ impl PrimaryNode {
         match client_server_result {
             Ok(Err(e)) => tracing::error!("Client network error: {e:?}"),
             Err(e) => tracing::error!("Client server task failed: {e:?}"),
+            _ => (),
+        }
+        match metrics_server_result {
+            Ok(Err(e)) => tracing::error!("Metrics server error: {e:?}"),
+            Err(e) => tracing::error!("Metrics server task failed: {e:?}"),
             _ => (),
         }
     }
@@ -147,8 +168,9 @@ mod tests {
     #[tracing_test::traced_test]
     async fn local_proxy() {
         let config = NodeConfig {
-            client_server_address: crate::networking::get_test_address(),
-            proxy_server_address: crate::networking::get_test_address(),
+            client_server_address: networking::get_test_address(),
+            proxy_server_address: networking::get_test_address(),
+            metrics_server_address: networking::get_test_address(),
             prover_parameters: ProverParameters::new_for_tests(),
         };
 
@@ -204,6 +226,7 @@ mod tests {
         let config = NodeConfig {
             client_server_address: networking::get_test_address(),
             proxy_server_address: networking::get_test_address(),
+            metrics_server_address: networking::get_test_address(),
             prover_parameters: ProverParameters {
                 total_compression_levels: 3,
                 ..ProverParameters::new_for_tests()
