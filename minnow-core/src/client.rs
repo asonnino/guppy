@@ -10,15 +10,16 @@ use tokio::{
 
 use crate::{
     config::NodeConfig,
+    messages::StateUpdateMessage,
     networking::{client::NetworkClient, DEFAULT_CHANNEL_SIZE},
-    proof_system::{self, StateUpdate},
+    proof_system::{self},
 };
 
 pub struct Client {
     config: NodeConfig,
     load: usize,
-    tx_outgoing: mpsc::Sender<Vec<StateUpdate>>,
-    network_client: NetworkClient<(), Vec<StateUpdate>>,
+    tx_outgoing: mpsc::Sender<StateUpdateMessage>,
+    network_client: NetworkClient<(), StateUpdateMessage>,
 }
 
 impl Client {
@@ -65,7 +66,8 @@ impl Client {
 
             let to_send = state_updates.drain(..count).collect::<Vec<_>>();
             for updates in to_send {
-                self.tx_outgoing.send(updates).await.unwrap();
+                let message = StateUpdateMessage::new(updates);
+                self.tx_outgoing.send(message).await.unwrap();
             }
         }
         tracing::info!("Client finished sending state updates");

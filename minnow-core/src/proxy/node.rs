@@ -122,6 +122,7 @@ mod tests {
             let tx = rx_connections.recv().await.unwrap();
             for i in 0..total_base_proofs {
                 let message = ProtocolMessage::BasicProofMaterial {
+                    submission_timestamp: Default::default(),
                     index: i,
                     material: crate::proof_system::sample_partial_witness(),
                 };
@@ -195,6 +196,7 @@ mod tests {
             let tx = rx_connections.recv().await.unwrap();
             for i in 0..total_base_proofs {
                 let message = ProtocolMessage::PartialCompressionProof {
+                    submission_timestamp: Default::default(),
                     index: i,
                     compression_level: config.prover_parameters.total_compression_levels - 1,
                     proof: crate::proof_system::sample_proof(),

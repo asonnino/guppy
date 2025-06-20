@@ -1,7 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use axum::{http::StatusCode, routing::get, Extension, Router};
 use prometheus::{
@@ -9,6 +12,8 @@ use prometheus::{
     Registry, TextEncoder,
 };
 use tokio::{net::TcpListener, task::JoinHandle};
+
+use crate::messages::SubmissionTimestamp;
 
 const LATENCY_SEC_BUCKETS: &[f64] = &[
     0.1, 0.25, 0.5, 0.75, 1., 1.25, 1.5, 1.75, 2., 2.5, 3.0, 4.0, 5., 10., 20., 30., 60., 90.,
@@ -23,6 +28,8 @@ pub const BASIC_PROVER_LABEL: &str = "basic_prover";
 pub const COMPRESS_PROVER_LABEL: &str = "compress_prover";
 pub const CYCLIC_PROVER_LABEL: &str = "cyclic_prover";
 pub const UPDATES_IN_FLIGHT: &str = "updates_in_flight";
+
+const DEFAULT_WORKLOAD: &str = "default";
 
 pub fn start_prometheus_server(
     address: SocketAddr,
@@ -85,11 +92,16 @@ impl Metrics {
         }
     }
 
-    pub fn observe_total_latency(&self, workload: &str, duration: Duration) {
-        tracing::debug!("Total latency for workload '{workload}' is {duration:?}");
+    pub fn observe_total_latency(&self, submission_timestamp: SubmissionTimestamp) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time should not be before UNIX epoch")
+            .as_secs_f64();
+        let duration = now - submission_timestamp;
+        tracing::debug!("Total latency for workload '{DEFAULT_WORKLOAD}' is {duration:?}");
         self.total_latency_s
-            .with_label_values(&[workload])
-            .observe(duration.as_secs_f64());
+            .with_label_values(&[DEFAULT_WORKLOAD])
+            .observe(duration);
     }
 
     fn observe_prover_latency(&self, prover: &str, duration: Duration) {

@@ -156,6 +156,7 @@ mod tests {
 
     use crate::{
         config::NodeConfig,
+        messages::StateUpdateMessage,
         networking::{self, client::NetworkClient},
         primary::node::{PrimaryNode, DEFAULT_CHANNEL_SIZE},
         proof_system::{ProverParameters, StateUpdate},
@@ -185,9 +186,11 @@ mod tests {
                 .spawn();
 
         let total_requests = 100;
-        for i in 0..total_requests {
-            let state_update = vec![i; 32];
-            tx_outgoing.send(vec![state_update]).await.unwrap();
+        let sample = crate::proof_system::sample_state_updates().pop().unwrap();
+        for _ in 0..total_requests {
+            let updates = sample.clone();
+            let message = StateUpdateMessage::new(updates);
+            tx_outgoing.send(message).await.unwrap();
         }
 
         // Wait for all requests to be processed
@@ -210,8 +213,9 @@ mod tests {
         let client_handle =
             NetworkClient::<(), _>::new(server_address, tx_incoming, rx_outgoing).spawn();
 
-        for update in state_updates {
-            tx_outgoing.send(update).await.unwrap();
+        for updates in state_updates {
+            let message = StateUpdateMessage::new(updates);
+            tx_outgoing.send(message).await.unwrap();
         }
 
         client_handle

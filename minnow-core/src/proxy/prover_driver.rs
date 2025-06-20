@@ -66,19 +66,25 @@ impl ProverDriver {
 
     async fn build_proof(&mut self, message: ProtocolMessage) -> ProtocolMessage {
         match message {
-            ProtocolMessage::BasicProofMaterial { index, material } => {
+            ProtocolMessage::BasicProofMaterial {
+                submission_timestamp,
+                index,
+                material,
+            } => {
                 let start = Instant::now();
                 let proof = self.basic_prover.prove(material);
                 let elapsed = start.elapsed();
                 self.metrics.observe_basic_prover_latency(elapsed);
 
                 ProtocolMessage::PartialCompressionProof {
+                    submission_timestamp,
                     index,
                     compression_level: 0,
                     proof,
                 }
             }
             ProtocolMessage::PartialCompressionProof {
+                submission_timestamp,
                 index,
                 compression_level,
                 proof,
@@ -90,13 +96,18 @@ impl ProverDriver {
 
                 if compression_level < self.max_compression_level {
                     ProtocolMessage::PartialCompressionProof {
+                        submission_timestamp,
                         index,
                         compression_level: compression_level + 1,
                         proof,
                     }
                 } else {
                     tracing::debug!("Final compression proof for index {index} with compression level {compression_level}");
-                    ProtocolMessage::FinalCompressionProof { index, proof }
+                    ProtocolMessage::FinalCompressionProof {
+                        submission_timestamp,
+                        index,
+                        proof,
+                    }
                 }
             }
             _ => panic!("Received unexpected message"),

@@ -9,18 +9,18 @@ use tokio::{
 };
 
 use crate::{
-    messages::{ProofIndex, ProtocolMessage},
+    messages::{ProofIndex, ProtocolMessage, StateUpdateMessage, SubmissionTimestamp},
     metrics::Metrics,
     primary::load_balancer::LoadBalancer,
-    proof_system::{PartialWitnessBuilder, Proof, StateUpdate},
+    proof_system::{PartialWitnessBuilder, Proof},
 };
 
 pub struct Dispatcher {
     metrics: Arc<Metrics>,
     rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
-    rx_state_updates: Receiver<Vec<StateUpdate>>,
+    rx_state_updates: Receiver<StateUpdateMessage>,
     rx_proxy_to_primary: Receiver<ProtocolMessage>,
-    tx_cyclic_prover: Sender<(ProofIndex, Proof)>,
+    tx_cyclic_prover: Sender<(SubmissionTimestamp, ProofIndex, Proof)>,
     load_balancer: LoadBalancer<ProtocolMessage>,
     partial_witness_builder: PartialWitnessBuilder,
     index: ProofIndex,
@@ -30,9 +30,9 @@ impl Dispatcher {
     pub fn new(
         metrics: Arc<Metrics>,
         rx_proxy_connections: Receiver<Sender<ProtocolMessage>>,
-        rx_state_updates: Receiver<Vec<StateUpdate>>,
+        rx_state_updates: Receiver<StateUpdateMessage>,
         rx_proxy_to_primary: Receiver<ProtocolMessage>,
-        tx_cyclic_prover: Sender<(ProofIndex, Proof)>,
+        tx_cyclic_prover: Sender<(SubmissionTimestamp, ProofIndex, Proof)>,
         load_balancer: LoadBalancer<ProtocolMessage>,
         partial_witness_builder: PartialWitnessBuilder,
     ) -> Self {
@@ -55,14 +55,15 @@ impl Dispatcher {
                     tracing::info!("Received new proxy connection, adding to load balancer");
                     self.load_balancer.add_proxy(connection);
                 },
-                Some(updates) = self.rx_state_updates.recv() => {
+                Some(message) = self.rx_state_updates.recv() => {
                     tracing::debug!("Received state update, building proof material");
+                    let StateUpdateMessage { submission_timestamp, updates } = message;
                     let start = Instant::now();
                     let material = self.partial_witness_builder.build(updates);
                     let elapsed = start.elapsed();
                     self.metrics.observe_partial_witness_builder_latency(elapsed);
 
-                    let message = ProtocolMessage::BasicProofMaterial { index: self.index, material };
+                    let message = ProtocolMessage::BasicProofMaterial { submission_timestamp, index: self.index, material };
                     self.index += 1;
 
                     if self.load_balancer.send(message).await.is_err() {
@@ -79,9 +80,9 @@ impl Dispatcher {
                             }
 
                         }
-                        ProtocolMessage::FinalCompressionProof{index, proof} => {
+                        ProtocolMessage::FinalCompressionProof{submission_timestamp, index, proof} => {
                             tracing::debug!("Received final compression proof for index {index}, forwarding to cyclic prover");
-                            if self.tx_cyclic_prover.send((index,proof)).await.is_err() {
+                            if self.tx_cyclic_prover.send((submission_timestamp,index,proof)).await.is_err() {
                                 break;
                             }
                         },
