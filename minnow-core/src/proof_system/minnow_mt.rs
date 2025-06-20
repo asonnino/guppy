@@ -132,16 +132,16 @@ impl ProverParameters {
         &self,
     ) -> (
         PartialWitnessBuilder,
-        BasicProver,
-        CompressProver,
+        BaseProver,
+        CompressionProver,
         CyclicProver,
     ) {
         let base_circuit = self.build_base_circuit();
         let (base_circuit_clone, compressed_circuits, cyclic_circuit) = self.build_circuits();
 
         let pw_builder = PartialWitnessBuilder::new(self, base_circuit);
-        let basic_prover = BasicProver::new(base_circuit_clone);
-        let compress_prover = CompressProver::new(compressed_circuits);
+        let basic_prover = BaseProver::new(base_circuit_clone);
+        let compress_prover = CompressionProver::new(compressed_circuits);
         let cyclic_prover = CyclicProver::new(cyclic_circuit);
 
         (pw_builder, basic_prover, compress_prover, cyclic_prover)
@@ -182,81 +182,8 @@ impl PartialWitnessBuilder {
     }
 }
 
-pub struct BasicProver {
-    circuit: BaseCircuit,
-}
-impl BasicProver {
-    pub fn new(base_circuit: BaseCircuit) -> Self {
-        Self {
-            circuit: base_circuit,
-        }
-    }
-
-    pub fn prove(&mut self, witness: PartialWitness) -> Proof {
-        let w = witness.into();
-        let proof = self.circuit.circuit_data.prove(w).unwrap();
-        debug_assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
-        proof
-    }
-}
-
-pub struct CompressProver {
-    circuits: Vec<CompressedCircuit>,
-}
-
-impl CompressProver {
-    pub fn new(circuits: Vec<CompressedCircuit>) -> Self {
-        Self { circuits }
-    }
-
-    pub fn prove(&mut self, material: Proof, compression_level: u16) -> Proof {
-        let circuit = &self.circuits[compression_level as usize];
-        let pw = circuit.set_inputs(&vec![&material]);
-        let proof = circuit.circuit_data.prove(pw).unwrap();
-        debug_assert!(circuit.circuit_data.verify(proof.clone()).is_ok());
-        proof
-    }
-}
-
-pub struct CyclicProver {
-    cyclic_circuit: CyclicSequentialCircuit,
-    prev_proof: ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>,
-    first_proof: bool,
-}
-
-impl CyclicProver {
-    pub fn new(cyclic_circuit: CyclicSequentialCircuit) -> Self {
-        let verifier_data = &cyclic_circuit.circuit_data.verifier_only;
-        let common_data = &cyclic_circuit.circuit_data.common;
-        let public_inputs = HashMap::<usize, F>::new();
-        let prev_proof = cyclic_base_proof(&common_data, &verifier_data, public_inputs);
-
-        Self {
-            cyclic_circuit,
-            prev_proof,
-            first_proof: true,
-        }
-    }
-
-    pub fn prove(&mut self, base_proof: Proof) -> Proof {
-        let verifier_data = &self.cyclic_circuit.circuit_data.verifier_only;
-        let pw = self.cyclic_circuit.set_inputs(
-            self.first_proof,
-            &base_proof,
-            &self.prev_proof,
-            &verifier_data,
-        );
-        self.first_proof = false;
-        let proof = self.cyclic_circuit.circuit_data.prove(pw).unwrap();
-        self.prev_proof = proof.clone();
-        let circuit_data = &self.cyclic_circuit.circuit_data;
-        debug_assert!(circuit_data.verify(proof.clone()).is_ok());
-        proof
-    }
-}
-
 pub fn generate_state_updates(parameters: &ProverParameters) -> Vec<Vec<StateUpdate>> {
-    minnow_lib::utils::generate_sample_checkpoint_updates(
+    minnow_lib::utils::generate_multiple_sample_updates(
         parameters.num_batches_per_base_circuit,
         parameters.num_batches_per_base_circuit,
         parameters.batch_size,

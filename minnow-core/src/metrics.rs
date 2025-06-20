@@ -5,12 +5,8 @@ use std::{net::SocketAddr, time::Duration};
 
 use axum::{http::StatusCode, routing::get, Extension, Router};
 use prometheus::{
-    register_histogram_vec_with_registry,
-    register_int_gauge_with_registry,
-    HistogramVec,
-    IntGauge,
-    Registry,
-    TextEncoder,
+    register_histogram_vec_with_registry, register_int_gauge_with_registry, HistogramVec, IntGauge,
+    Registry, TextEncoder,
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 

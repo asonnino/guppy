@@ -9,9 +9,7 @@ use tokio::{
 };
 
 use crate::{
-    config::NodeConfig,
-    metrics::Metrics,
-    networking::client::NetworkClient,
+    config::NodeConfig, metrics::Metrics, networking::client::NetworkClient,
     proxy::prover_driver::ProverDriver,
 };
 
@@ -92,11 +90,8 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::{
-        config::NodeConfig,
-        messages::ProtocolMessage,
-        networking::server::NetworkServer,
-        proof_system::ProverParameters,
-        proxy::node::ProxyNode,
+        config::NodeConfig, messages::ProtocolMessage, networking::server::NetworkServer,
+        proof_system::ProverParameters, proxy::node::ProxyNode,
     };
 
     #[tokio::test]

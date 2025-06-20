@@ -167,13 +167,11 @@ impl StreamPointTarget {
     }
 }
 
-// Each checkpoint contains a collection of batches.
-pub type CheckpointUpdates = Vec<Vec<StreamPoint>>;
-// A bundle is also a collection of batches. Our circuit's either handle a bundle or a sub-bundle.
-pub type Bundle = Vec<Vec<StreamPoint>>;
+// All our circuits operates on batches of stream points of fixed size.
+pub type Batch = Vec<StreamPoint>;
 
 pub fn hash_commitment(
-    updates: &CheckpointUpdates,
+    updates: &Vec<Batch>,
     batch_size: usize,
     prev_head: &Digest,
 ) -> Digest {

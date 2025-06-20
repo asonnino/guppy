@@ -9,9 +9,10 @@ use plonky2::plonk::config::Hasher;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 
 use log::info;
+use plonky2::plonk::proof::ProofWithPublicInputs;
 
-use crate::CheckpointUpdates;
-use crate::{Bundle, StreamPoint};
+use crate::Batch;
+use crate::StreamPoint;
 
 #[derive(Debug)]
 pub struct CircuitInfo {
@@ -61,21 +62,21 @@ pub fn print_system_info(
     );
 }
 
-pub fn generate_sample_checkpoint_updates(
-    num_checkpoints: usize,
-    num_batches_per_checkpoint: usize,
-    batch_size: usize,
-) -> Vec<CheckpointUpdates> {
-    let all_checkpoint_updates = generate_sample_updates(num_checkpoints * num_batches_per_checkpoint, batch_size);
-    all_checkpoint_updates.chunks(num_batches_per_checkpoint).map(|chunk| chunk.to_vec()).collect()
-}
+// pub fn generate_multiple_sample_updates(
+//     num_bundles: usize,
+//     num_batches_per_bundle: usize,
+//     batch_size: usize,
+// ) -> Vec<Bundle> {
+//     let all_updates = generate_sample_updates(num_bundles * num_batches_per_bundle, batch_size);
+//     all_updates.chunks(num_batches_per_bundle).map(|chunk| chunk.to_vec()).collect()
+// }
 
 // Test vector: All batches update the same set of stream points
 // [[StreamPoint; batch_size]; num_batches]
 pub fn generate_sample_updates(
     num_batches: usize,
     batch_size: usize,
-) -> Bundle {
+) -> Vec<Batch> {
     let start_batch_number = 0;
     let mut all_updates = Vec::new();
     let first_set: Vec<StreamPoint> = (0..batch_size)
@@ -124,6 +125,7 @@ pub type Digest = <H as Hasher<F>>::Hash;
 pub type InnerHasher = <C as GenericConfig<D>>::InnerHasher;
 pub type MyCircuitBuilder = CircuitBuilder<F, D>;
 pub type MyPartialWitness = PartialWitness<F>;
+pub type Proof = ProofWithPublicInputs<F, C, D>;
 
 // Generates `CommonCircuitData` usable for recursion.
 pub fn common_data_for_recursion(

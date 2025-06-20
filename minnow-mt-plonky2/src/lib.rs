@@ -28,6 +28,9 @@ pub struct MinnowMTServiceState {
     pub merkle_tree: MerkleTree,
     // used to quickly find the index of a stream point
     stream_id_to_idx: HashMap<StreamID, usize>,
+
+    // The current hash chain head until which we've processed the updates
+    pub cur_head: Digest,
 }
 
 impl MinnowMTServiceState {
@@ -41,6 +44,7 @@ impl MinnowMTServiceState {
         Self {
             merkle_tree,
             stream_id_to_idx,
+            cur_head: Digest::ZERO,
         }
     }
 
@@ -58,6 +62,14 @@ impl MinnowMTServiceState {
 
     pub fn get_idx(&self, stream_id: &StreamID) -> Option<usize> {
         self.stream_id_to_idx.get(stream_id).cloned()
+    }
+
+    pub fn get_head(&self) -> Digest {
+        self.cur_head
+    }
+
+    pub fn update_head(&mut self, new_head: &Digest) {
+        self.cur_head = new_head.clone();
     }
 
     pub fn update_leaf(&mut self, point: &StreamPoint) {

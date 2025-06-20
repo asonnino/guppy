@@ -13,9 +13,7 @@ use crate::{
     metrics::Metrics,
     networking::server::NetworkServer,
     primary::{
-        cyclic_driver::CyclicProverDriver,
-        dispatcher::Dispatcher,
-        load_balancer::LoadBalancer,
+        cyclic_driver::CyclicProverDriver, dispatcher::Dispatcher, load_balancer::LoadBalancer,
     },
     proof_system::Proof,
     proxy::prover_driver::ProverDriver,

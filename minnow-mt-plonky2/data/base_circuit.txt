@@ -1,0 +1,16 @@
+cargo run --bin circuit_sizes -- base --release
+   Compiling minnow-lib v0.1.0 (/Users/saikrishnadeepakmaram/Desktop/minnow/minnow-lib)
+   Compiling minnow-mt-plonky2 v0.1.0 (/Users/saikrishnadeepakmaram/Desktop/minnow/minnow-mt-plonky2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.00s
+     Running `/Users/saikrishnadeepakmaram/Desktop/minnow/target/debug/circuit_sizes base --release`
+Base Circuit Parameters:
+=======================
+Updates	Gates	Degree Bits
+------------------------
+0	0	0
+50	3496	12
+100	6990	13
+200	13980	14
+450	31456	15
+900	62910	16
+1850	129316	17

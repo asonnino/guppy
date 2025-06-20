@@ -1,7 +1,8 @@
 use log::info;
 use minnow_lib::{
+    hash_commitment,
     utils::{common_data_for_recursion, print_system_info, CircuitInfo, Digest, C, D, F},
-    Bundle,
+    Batch,
 };
 use plonky2::{
     field::types::Field,
@@ -13,10 +14,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig,
-            CircuitData,
-            VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
+            CircuitConfig, CircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -24,6 +22,8 @@ use plonky2::{
 };
 
 use crate::{merkle::MerkleProofTargets, process_many_batches, CircuitState, MinnowMTServiceState};
+
+pub type Bundle = Vec<Batch>;
 
 pub struct TwoStepMinnowMTCircuits {
     pub base_circuit: BaseCircuit,
@@ -132,7 +132,6 @@ impl BaseCircuit {
         &self,
         bundle: &Bundle,
         zk_service_state: &mut MinnowMTServiceState,
-        cur_checkpoint_head: &Digest,
     ) -> PartialWitness<F> {
         assert_eq!(
             bundle.len(),
@@ -150,14 +149,25 @@ impl BaseCircuit {
             F::from_canonical_usize(zk_service_state.get_num_leaves()),
         )
         .unwrap();
-        pw.set_hash_target(self.inputs.in_checkpoint_head_t, *cur_checkpoint_head)
-            .unwrap();
+        pw.set_hash_target(
+            self.inputs.in_checkpoint_head_t,
+            zk_service_state.get_head(),
+        )
+        .unwrap();
 
         for (i, update) in bundle.iter().flatten().enumerate() {
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.prev_targets[i], &update.id);
             zk_service_state.update_leaf(&update);
             zk_service_state.add_proof_targets(&mut pw, &self.inputs.new_targets[i], &update.id);
         }
+
+        let new_head = hash_commitment(
+            &bundle,
+            self.config.batch_size,
+            &zk_service_state.get_head(),
+        );
+        zk_service_state.update_head(&new_head);
+
         pw
     }
 }
@@ -314,13 +324,9 @@ mod tests {
     use std::time::Instant;
 
     use hashbrown::HashMap;
-    use minnow_lib::{
-        hash_commitment,
-        utils::{generate_sample_checkpoint_updates, generate_sample_updates, Digest},
-    };
+    use minnow_lib::utils::generate_sample_updates;
     use plonky2::recursion::{
-        cyclic_recursion::check_cyclic_proof_verifier_data,
-        dummy_circuit::cyclic_base_proof,
+        cyclic_recursion::check_cyclic_proof_verifier_data, dummy_circuit::cyclic_base_proof,
     };
     use tokio::sync::mpsc;
 
@@ -339,16 +345,14 @@ mod tests {
         println!("{:?}", circuit.circuit_info);
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
         let checkpoint_updates = generate_sample_updates(num_batches, batch_size);
-        let old_head = Digest::ZERO;
+
+        let old_head = zk_service_state.get_head();
         let old_num_leaves = zk_service_state.get_num_leaves();
         let old_root = zk_service_state.get_root();
 
-        let new_head = hash_commitment(&checkpoint_updates, batch_size, &old_head);
-        let pw = circuit.apply_bundle_and_compute_witness(
-            &checkpoint_updates,
-            &mut zk_service_state,
-            &old_head,
-        );
+        let pw =
+            circuit.apply_bundle_and_compute_witness(&checkpoint_updates, &mut zk_service_state);
+        let new_head = zk_service_state.get_head();
 
         let start = Instant::now();
         let proof = circuit.circuit_data.prove(pw).unwrap();
@@ -379,11 +383,12 @@ mod tests {
         let num_batches_per_checkpoint = 5; // also equal to num_batches_per_checkpoint
         let batch_size = 10;
         let num_checkpoints = 5;
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(
-            num_checkpoints,
-            num_batches_per_checkpoint,
-            batch_size,
-        );
+        let all_checkpoint_updates =
+            generate_sample_updates(num_checkpoints * num_batches_per_checkpoint, batch_size);
+        let all_checkpoint_updates: Vec<Bundle> = all_checkpoint_updates
+            .chunks(num_batches_per_checkpoint)
+            .map(|chunk| chunk.to_vec())
+            .collect();
 
         let initial_root = get_initial_root(log_state_size + 1);
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
@@ -395,27 +400,19 @@ mod tests {
         println!("Base circuit: {:?}", base_circuit.circuit_info);
         println!("Cyclic circuit: {:?}", cyclic_circuit.circuit_info);
 
-        let mut cur_head = Digest::ZERO;
         let mut base_proofs = vec![];
 
         // Generate all base proofs
         for i in 0..num_checkpoints {
             let sample_updates = all_checkpoint_updates[i].clone();
-            let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
-            let pw = base_circuit.apply_bundle_and_compute_witness(
-                &sample_updates,
-                &mut zk_service_state,
-                &cur_head,
-            );
+            let pw = base_circuit
+                .apply_bundle_and_compute_witness(&sample_updates, &mut zk_service_state);
             let proof = base_circuit.circuit_data.prove(pw).unwrap();
             base_proofs.push(proof.clone());
 
             base_circuit.circuit_data.verify(proof).unwrap();
             println!("Base proof {} verified", i);
-
-            // Update the head
-            cur_head = new_head;
-            println!("Cur head: {:?}", cur_head);
+            println!("Cur head: {:?}", zk_service_state.get_head());
         }
 
         // Generate all cyclic proofs sequentially
@@ -442,11 +439,12 @@ mod tests {
         let num_batches_per_checkpoint = 3;
         let batch_size = 2;
         let num_checkpoints = 3;
-        let all_checkpoint_updates = generate_sample_checkpoint_updates(
-            num_checkpoints,
-            num_batches_per_checkpoint,
-            batch_size,
-        );
+        let all_checkpoint_updates =
+            generate_sample_updates(num_checkpoints * num_batches_per_checkpoint, batch_size);
+        let all_checkpoint_updates: Vec<Bundle> = all_checkpoint_updates
+            .chunks(num_batches_per_checkpoint)
+            .map(|chunk| chunk.to_vec())
+            .collect();
 
         // Initialize the initial root and state for the primary
         let initial_root = get_initial_root(log_state_size + 1);
@@ -463,17 +461,11 @@ mod tests {
 
         // Running on the Primary: Generate all base proofs
         let hasher_handle = tokio::spawn(async move {
-            let mut cur_head = Digest::ZERO;
-
             for i in 0..num_checkpoints {
                 tracing::info!("[primary] Processing checkpoint {i}");
                 let sample_updates = all_checkpoint_updates[i].clone();
-                let new_head = hash_commitment(&sample_updates, batch_size, &cur_head);
-                let pw = base_circuit.apply_bundle_and_compute_witness(
-                    &sample_updates,
-                    &mut zk_service_state,
-                    &cur_head,
-                );
+                let pw = base_circuit
+                    .apply_bundle_and_compute_witness(&sample_updates, &mut zk_service_state);
 
                 let message = PartialWitnessMessage {
                     index: i as u64,
@@ -485,8 +477,6 @@ mod tests {
                 } else {
                     tx_proxy_2_pw.send(serialized).await.unwrap();
                 }
-
-                cur_head = new_head;
             }
 
             // Close the channels to signal completion

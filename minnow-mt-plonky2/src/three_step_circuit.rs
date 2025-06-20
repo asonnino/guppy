@@ -1,15 +1,13 @@
-use log::debug;
 use log::info;
-use minnow_lib::hash_commitment;
-use minnow_lib::utils::Digest;
-use minnow_lib::Bundle;
+use minnow_lib::utils::generate_sample_updates;
+use minnow_lib::utils::MyPartialWitness;
+use minnow_lib::Batch;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 use plonky2::recursion::dummy_circuit::cyclic_base_proof;
 use plonky2::with_context;
@@ -19,63 +17,159 @@ use crate::two_step_circuit::{BaseCircuit, CyclicSequentialCircuit};
 use crate::MinnowMTServiceState;
 
 use hashbrown::HashMap;
-use std::time::Instant;
 
 use minnow_lib::utils::CircuitInfo;
-use minnow_lib::utils::{C, D, F};
+use minnow_lib::utils::{Proof, C, D, F};
 
-pub struct ThreeStepMinnowMTCircuitConfig {
+pub type SubBundle = Vec<Batch>;
+pub type Bundle = Vec<SubBundle>;
+
+#[derive(Debug, Clone)]
+pub struct MinnowBConfig {
     pub log_state_size: usize,
+    pub batch_size: usize,
+    pub num_batches_per_sub_bundle: usize,
+    pub branching_factor: usize,
+    pub num_compression_levels: u32,
     pub bundle_size: usize,
     pub sub_bundle_size: usize,
-    pub batch_size: usize,
-    pub branching_factor: usize,
-    pub num_base_circuits_to_compress: usize,
-    pub num_compression_levels: u32,
+    pub num_sub_bundles: usize,
 }
 
-pub struct ThreeStepMinnowMTCircuits {
+impl Default for MinnowBConfig {
+    fn default() -> Self {
+        let log_state_size = 10;
+        let branching_factor = 2;
+        let num_compression_levels = 2;
+        let batch_size = 10;
+        let num_batches_per_sub_bundle = 2;
+        Self::new(
+            log_state_size,
+            batch_size,
+            num_batches_per_sub_bundle,
+            branching_factor,
+            num_compression_levels,
+        )
+    }
+}
+
+impl MinnowBConfig {
+    pub fn new(
+        log_state_size: usize,
+        batch_size: usize,
+        num_batches_per_sub_bundle: usize,
+        branching_factor: usize,
+        num_compression_levels: u32,
+    ) -> Self {
+        let sub_bundle_size = num_batches_per_sub_bundle * batch_size;
+        let bundle_size = sub_bundle_size * (branching_factor.pow(num_compression_levels));
+        let num_sub_bundles = bundle_size / sub_bundle_size;
+
+        println!(
+            "num_base_circuits_to_compress / num_sub_bundles: {}",
+            num_sub_bundles
+        );
+        assert!(branching_factor.pow(num_compression_levels) == num_sub_bundles);
+
+        Self {
+            log_state_size,
+            batch_size,
+            num_batches_per_sub_bundle,
+            branching_factor,
+            num_compression_levels,
+            bundle_size,
+            sub_bundle_size,
+            num_sub_bundles,
+        }
+    }
+
+    pub fn get_bundle_size(&self) -> usize {
+        let sub_bundle_size = self.batch_size * self.num_batches_per_sub_bundle;
+        sub_bundle_size * self.branching_factor.pow(self.num_compression_levels)
+    }
+
+    pub fn get_sub_bundle_size(&self) -> usize {
+        self.batch_size * self.num_batches_per_sub_bundle
+    }
+
+    pub fn generate_single_sample_bundle(&self) -> Bundle {
+        let num_batches_per_bundle = self.get_bundle_size() / self.batch_size;
+        let all_batches = generate_sample_updates(num_batches_per_bundle, self.batch_size);
+        all_batches
+            .chunks(self.num_batches_per_sub_bundle)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    pub fn generate_multiple_sample_bundles(&self, num_bundles: usize) -> Vec<Bundle> {
+        let num_batches_per_bundle = self.get_bundle_size() / self.batch_size;
+        let all_batches =
+            generate_sample_updates(num_batches_per_bundle * num_bundles, self.batch_size);
+        let all_sub_bundles: Vec<SubBundle> = all_batches
+            .chunks(self.num_batches_per_sub_bundle)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        all_sub_bundles
+            .chunks(self.num_sub_bundles)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    pub fn sanity_check_bundle(&self, bundle: &Bundle) {
+        assert_eq!(bundle.len(), self.num_sub_bundles, "Bundle size mismatch");
+        for sub_bundle in bundle {
+            assert_eq!(
+                sub_bundle.len(),
+                self.num_batches_per_sub_bundle,
+                "Batch size mismatch"
+            );
+            for batch in sub_bundle {
+                assert_eq!(batch.len(), self.batch_size, "Batch size mismatch");
+            }
+        }
+    }
+}
+
+pub struct MinnowBCircuits {
     pub base_circuit: BaseCircuit,
     pub compressed_circuits: Vec<CompressedCircuit>,
     pub sequential_circuit: CyclicSequentialCircuit,
-    pub config: ThreeStepMinnowMTCircuitConfig,
+    pub config: MinnowBConfig,
 }
 
-impl ThreeStepMinnowMTCircuits {
+impl MinnowBCircuits {
+    pub fn new_with_config(config: &MinnowBConfig) -> Self {
+        let log_state_size = config.log_state_size;
+        let batch_size = config.batch_size;
+        let num_batches_per_sub_bundle = config.num_batches_per_sub_bundle;
+        let branching_factor = config.branching_factor;
+        let num_compression_levels = config.num_compression_levels;
+
+        Self::new(
+            log_state_size,
+            batch_size,
+            num_batches_per_sub_bundle,
+            branching_factor,
+            num_compression_levels,
+        )
+    }
+
     pub fn new(
         log_state_size: usize,
-        bundle_size: usize,
-        sub_bundle_size: usize,
         batch_size: usize,
+        num_batches_per_sub_bundle: usize,
         branching_factor: usize,
+        num_compression_levels: u32,
     ) -> Self {
-        let num_batches_per_bundle = bundle_size / batch_size;
-        assert!(bundle_size % batch_size == 0);
-        let num_batches_per_base_circuit = sub_bundle_size / batch_size;
-        assert!(sub_bundle_size % batch_size == 0);
-
-        info!("num_batches_per_bundle: {}", num_batches_per_bundle);
-        info!(
-            "num_batches_per_base_circuit: {}",
-            num_batches_per_base_circuit
+        let config = MinnowBConfig::new(
+            log_state_size,
+            batch_size,
+            num_batches_per_sub_bundle,
+            branching_factor,
+            num_compression_levels,
         );
 
-        let base_circuit =
-            BaseCircuit::new(log_state_size, num_batches_per_base_circuit, batch_size);
-
-        // ceil(bundle_size / sub_bundle_size)
-        let num_base_circuits_to_compress = bundle_size.div_ceil(sub_bundle_size);
-        println!(
-            "num_base_circuits_to_compress: {}",
-            num_base_circuits_to_compress
-        );
-
-        // Compute ceil(log_branching_factor(num_base_circuits_to_compress))
-        let mut num_compression_levels = num_base_circuits_to_compress.ilog(branching_factor);
-        if branching_factor.pow(num_compression_levels) < num_base_circuits_to_compress {
-            num_compression_levels += 1;
-        }
-        assert!(branching_factor.pow(num_compression_levels) >= num_base_circuits_to_compress);
+        let base_circuit = BaseCircuit::new(log_state_size, num_batches_per_sub_bundle, batch_size);
 
         let mut compressed_circuits: Vec<CompressedCircuit> = vec![];
         for _ in 0..num_compression_levels {
@@ -99,143 +193,25 @@ impl ThreeStepMinnowMTCircuits {
             base_circuit,
             compressed_circuits,
             sequential_circuit,
-            config: ThreeStepMinnowMTCircuitConfig {
-                log_state_size,
-                bundle_size,
-                sub_bundle_size,
-                batch_size,
-                branching_factor,
-                num_base_circuits_to_compress,
-                num_compression_levels,
-            },
+            config,
         }
     }
 
-    pub fn apply_bundle_and_prove(
-        &self,
-        bundle: &Bundle,
-        zk_service_state: &mut MinnowMTServiceState,
-        cur_head: &Digest,
-        mut prev_sequential_proof: Option<ProofWithPublicInputs<F, C, D>>,
-        verify_proofs: bool,
-    ) -> (Digest, ProofWithPublicInputs<F, C, D>) {
-        assert_eq!(
-            bundle.len(),
-            self.config.bundle_size / self.config.batch_size,
-            "Bundle size mismatch"
-        );
-        for batch in bundle {
-            assert_eq!(batch.len(), self.config.batch_size, "Batch size mismatch");
+    // Consumes the circuit and returns the provers.
+    pub fn build_provers(self) -> MinnowBProvers {
+        let base_prover = BaseProver::new(self.base_circuit);
+        let compression_provers = self
+            .compressed_circuits
+            .into_iter()
+            .map(|c| CompressionProver::new(c))
+            .collect();
+        let cyclic_prover = CyclicProver::new(self.sequential_circuit);
+        MinnowBProvers {
+            base_prover,
+            compression_provers,
+            cyclic_prover,
+            config: self.config,
         }
-        info!("================Prove bundle================================");
-
-        // Generate all base proofs
-        let num_sub_bundles = self
-            .config
-            .bundle_size
-            .div_ceil(self.config.sub_bundle_size);
-        debug!("Number of sub-bundles: {}", num_sub_bundles);
-        let mut base_proofs = vec![];
-        let num_batches_per_sub_bundle = self.config.sub_bundle_size / self.config.batch_size;
-        let mut cur_head = cur_head.clone();
-        for i in 0..num_sub_bundles {
-            let sample_updates = bundle
-                [i * num_batches_per_sub_bundle..(i + 1) * num_batches_per_sub_bundle]
-                .to_vec();
-            let new_head = hash_commitment(&sample_updates, self.config.batch_size, &cur_head);
-            let pw = self.base_circuit.apply_bundle_and_compute_witness(
-                &sample_updates,
-                zk_service_state,
-                &cur_head,
-            );
-            let start = Instant::now();
-            let proof = self.base_circuit.circuit_data.prove(pw).unwrap();
-            base_proofs.push(proof.clone());
-            let end = Instant::now();
-            info!(
-                "Base proof {} generation time: {:?}",
-                i,
-                end.duration_since(start)
-            );
-
-            // To be run by the verifier
-            if verify_proofs {
-                self.base_circuit.circuit_data.verify(proof).unwrap();
-                info!("Base proof {} verified", i);
-            }
-
-            cur_head = new_head;
-        }
-
-        // Generate the compressed proofs sequentially. At each level, use the previous level's proofs as inputs.
-
-        let mut cur_level_proofs = base_proofs;
-        for i in 0..self.config.num_compression_levels {
-            let compressed_circuit = &self.compressed_circuits[i as usize];
-            // let cur_level_proofs_refs: Vec<&ProofWithPublicInputs<F, C, D>> = cur_level_proofs.iter().collect();
-            let num_proofs_to_generate = cur_level_proofs.len() / self.config.branching_factor;
-            let mut new_level_proofs = vec![];
-            for j in 0..num_proofs_to_generate {
-                let cur_level_proof_refs: Vec<&ProofWithPublicInputs<F, C, D>> = cur_level_proofs
-                    [j * self.config.branching_factor..(j + 1) * self.config.branching_factor]
-                    .iter()
-                    .collect();
-                let pw = compressed_circuit.set_inputs(&cur_level_proof_refs);
-                let start = Instant::now();
-                let proof = compressed_circuit.circuit_data.prove(pw).unwrap();
-                new_level_proofs.push(proof.clone());
-                let end = Instant::now();
-                info!(
-                    "Level {} compressed proof {} generation time: {:?}",
-                    i,
-                    j,
-                    end.duration_since(start)
-                );
-
-                if verify_proofs {
-                    compressed_circuit
-                        .circuit_data
-                        .verify(proof.clone())
-                        .unwrap();
-                    info!("Level {} compressed proof {} verified", i, j);
-                }
-            }
-            cur_level_proofs = new_level_proofs;
-        }
-
-        let sequential_circuit = &self.sequential_circuit;
-        assert_eq!(
-            cur_level_proofs.len(),
-            1,
-            "Expected 1 proof at the end of compression"
-        );
-        let mut base_case = false;
-        if prev_sequential_proof.is_none() {
-            base_case = true;
-            let verifier_data = &sequential_circuit.circuit_data.verifier_only;
-            let common_data = &sequential_circuit.circuit_data.common;
-            let starter_proof =
-                cyclic_base_proof(&common_data, &verifier_data, HashMap::<usize, F>::new());
-            prev_sequential_proof = Some(starter_proof);
-        }
-        let prev_sequential_proof = prev_sequential_proof.unwrap();
-
-        let pw = sequential_circuit.set_inputs(
-            base_case,
-            &cur_level_proofs[0],
-            &prev_sequential_proof,
-            &sequential_circuit.circuit_data.verifier_only,
-        );
-        let proof = sequential_circuit.circuit_data.prove(pw).unwrap();
-        if verify_proofs {
-            sequential_circuit
-                .circuit_data
-                .verify(proof.clone())
-                .unwrap();
-            info!("Sequential proof verified");
-        }
-
-        (cur_head, proof)
     }
 }
 
@@ -323,7 +299,7 @@ impl CompressedCircuit {
         }
     }
 
-    pub fn set_inputs(&self, in_proofs: &[&ProofWithPublicInputs<F, C, D>]) -> PartialWitness<F> {
+    pub fn set_inputs(&self, in_proofs: &[&Proof]) -> PartialWitness<F> {
         assert_eq!(in_proofs.len(), self.targets.in_proofs.len());
         let mut pw = PartialWitness::new();
         for i in 0..self.targets.in_proofs.len() {
@@ -334,15 +310,228 @@ impl CompressedCircuit {
     }
 }
 
+pub struct MinnowBProvers {
+    pub base_prover: BaseProver,
+    pub compression_provers: Vec<CompressionProver>,
+    pub cyclic_prover: CyclicProver,
+    pub config: MinnowBConfig,
+}
+
+pub struct Orchestrator {
+    pub state: MinnowMTServiceState,
+    pub provers: MinnowBProvers,
+    pub debug: bool,
+}
+
+impl Orchestrator {
+    pub fn new(provers: MinnowBProvers, debug: bool) -> Self {
+        let state = MinnowMTServiceState::new(&[], provers.config.log_state_size);
+        Self {
+            state,
+            provers,
+            debug,
+        }
+    }
+
+    // Step 1: Process a bundle and return the base witnesses.
+    pub fn process_bundle_and_return_base_witnesses(
+        &mut self,
+        bundle: &Bundle,
+    ) -> Vec<MyPartialWitness> {
+        // Sanity check the bundle to catch any errors early.
+        self.provers.config.sanity_check_bundle(bundle);
+
+        let mut base_witnesses = vec![];
+        for i in 0..self.provers.config.num_sub_bundles {
+            let sub_bundle = &bundle[i];
+            let pw = self
+                .provers
+                .base_prover
+                .circuit
+                .apply_bundle_and_compute_witness(&sub_bundle, &mut self.state);
+            base_witnesses.push(pw);
+        }
+        base_witnesses
+    }
+
+    // Step 2: Compute base proofs
+    pub fn compute_base_proof(&mut self, base_witness: MyPartialWitness) -> Proof {
+        let proof = self.provers.base_prover.prove(base_witness);
+        if self.debug {
+            self.provers.base_prover.verify(proof.clone());
+        }
+        proof
+    }
+
+    // (Single machine) Compute all the base proofs in one go.
+    pub fn compute_all_base_proofs(&mut self, base_witnesses: Vec<MyPartialWitness>) -> Vec<Proof> {
+        let mut base_proofs = vec![];
+        for witness in base_witnesses {
+            let proof = self.compute_base_proof(witness);
+            base_proofs.push(proof);
+        }
+        base_proofs
+    }
+
+    // Step 3: One round of compression of base proofs
+    pub fn compress_base_proofs(&mut self, base_proofs: &[&Proof], level: usize) -> Proof {
+        assert!(base_proofs.len() == self.provers.config.branching_factor);
+        let compression_prover = &mut self.provers.compression_provers[level];
+        let proof = compression_prover.prove(&base_proofs);
+        if self.debug {
+            compression_prover.verify(proof.clone());
+        }
+        proof
+    }
+
+    // (Single machine) Compute all the compression proofs in one go.
+    pub fn compress_all_base_proofs(&mut self, base_proofs: Vec<Proof>) -> Proof {
+        let b = self.provers.config.branching_factor;
+        let mut cur_level_proofs: Vec<Vec<Proof>> =
+            base_proofs.chunks(b).map(|chunk| chunk.to_vec()).collect();
+
+        for i in 0..self.provers.config.num_compression_levels as usize {
+            let mut new_level_proofs = vec![];
+            let cur_level_proof_refs: Vec<Vec<&Proof>> = cur_level_proofs
+                .iter()
+                .map(|chunk| chunk.iter().collect())
+                .collect();
+            for j in 0..cur_level_proofs.len() {
+                let proof = self.compress_base_proofs(&cur_level_proof_refs[j], i);
+                new_level_proofs.push(proof);
+            }
+            cur_level_proofs = new_level_proofs
+                .chunks(b)
+                .map(|chunk| chunk.to_vec())
+                .collect();
+        }
+
+        if cur_level_proofs.len() != 1 || cur_level_proofs[0].len() != 1 {
+            panic!("Expected 1 proof at the end of compression");
+        }
+        cur_level_proofs[0][0].clone()
+    }
+
+    // Step 4: Prove the sequential circuit
+    pub fn compute_cyclic_proof(&mut self, compressed_proof: Proof) -> Proof {
+        let cyclic_prover = &mut self.provers.cyclic_prover;
+        let proof = cyclic_prover.prove(compressed_proof);
+        if self.debug {
+            cyclic_prover.verify(proof.clone());
+        }
+        proof
+    }
+
+    // Step 5: Verify the final proof of the cyclic circuit
+    pub fn verify_cyclic_proof(&mut self, proof: Proof) {
+        self.provers.cyclic_prover.verify(proof);
+    }
+
+    // (Single machine) Compute all the proofs in one go.
+    pub fn compute_proof(&mut self, bundle: &Bundle) -> Proof {
+        let base_witnesses = self.process_bundle_and_return_base_witnesses(bundle);
+        let base_proofs = self.compute_all_base_proofs(base_witnesses);
+        let compressed_proof = self.compress_all_base_proofs(base_proofs);
+        let cyclic_proof = self.compute_cyclic_proof(compressed_proof);
+        cyclic_proof
+    }
+}
+
+pub struct BaseProver {
+    circuit: BaseCircuit,
+}
+
+impl BaseProver {
+    pub fn new(base_circuit: BaseCircuit) -> Self {
+        Self {
+            circuit: base_circuit,
+        }
+    }
+
+    pub fn prove(&mut self, witness: MyPartialWitness) -> Proof {
+        let proof = self.circuit.circuit_data.prove(witness).unwrap();
+        debug_assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
+        proof
+    }
+
+    pub fn verify(&mut self, proof: Proof) {
+        self.circuit.circuit_data.verify(proof).unwrap();
+    }
+}
+
+pub struct CompressionProver {
+    circuit: CompressedCircuit,
+}
+
+impl CompressionProver {
+    pub fn new(circuit: CompressedCircuit) -> Self {
+        Self { circuit }
+    }
+
+    pub fn prove(&mut self, materials: &[&Proof]) -> Proof {
+        let pw = self.circuit.set_inputs(&materials);
+        let proof = self.circuit.circuit_data.prove(pw).unwrap();
+        debug_assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
+        proof
+    }
+
+    pub fn verify(&mut self, proof: Proof) {
+        self.circuit.circuit_data.verify(proof).unwrap();
+    }
+}
+
+pub struct CyclicProver {
+    cyclic_circuit: CyclicSequentialCircuit,
+    prev_proof: Proof,
+    first_proof: bool,
+}
+
+impl CyclicProver {
+    pub fn new(cyclic_circuit: CyclicSequentialCircuit) -> Self {
+        let verifier_data = &cyclic_circuit.circuit_data.verifier_only;
+        let common_data = &cyclic_circuit.circuit_data.common;
+        let public_inputs = HashMap::<usize, F>::new();
+        let prev_proof = cyclic_base_proof(&common_data, &verifier_data, public_inputs);
+
+        Self {
+            cyclic_circuit,
+            prev_proof,
+            first_proof: true,
+        }
+    }
+
+    pub fn prove(&mut self, compressed_proof: Proof) -> Proof {
+        let verifier_data = &self.cyclic_circuit.circuit_data.verifier_only;
+        let pw = self.cyclic_circuit.set_inputs(
+            self.first_proof,
+            &compressed_proof,
+            &self.prev_proof,
+            &verifier_data,
+        );
+        self.first_proof = false;
+        let proof = self.cyclic_circuit.circuit_data.prove(pw).unwrap();
+        self.prev_proof = proof.clone();
+        debug_assert!(&self
+            .cyclic_circuit
+            .circuit_data
+            .verify(proof.clone())
+            .is_ok());
+        proof
+    }
+
+    pub fn verify(&mut self, proof: Proof) {
+        self.cyclic_circuit.circuit_data.verify(proof).unwrap();
+    }
+}
+
 #[allow(unused_imports)]
 mod tests {
     use super::*;
     use crate::MinnowMTServiceState;
     use minnow_lib::hash_commitment;
-    use minnow_lib::utils::{
-        generate_sample_checkpoint_updates, generate_sample_updates, set_log_level, Digest,
-    };
+    use minnow_lib::utils::{generate_sample_updates, set_log_level, Digest};
     use std::time::Instant;
+    use tracing::Level;
 
     #[test]
     fn test_compressed_circuit() {
@@ -356,21 +545,17 @@ mod tests {
         let circuit = BaseCircuit::new(log_state_size, num_batches, batch_size);
 
         // Generate two base proofs
-        let all_checkpoint_updates =
-            generate_sample_checkpoint_updates(num_checkpoints, num_batches, batch_size);
-        let mut head = Digest::ZERO;
-        let pw = circuit.apply_bundle_and_compute_witness(
-            &all_checkpoint_updates[0],
-            &mut zk_service_state,
-            &head,
-        );
+        let all_checkpoint_updates: Bundle =
+            generate_sample_updates(num_checkpoints * num_batches, batch_size)
+                .chunks(num_batches)
+                .map(|chunk| chunk.to_vec())
+                .collect();
+
+        let pw = circuit
+            .apply_bundle_and_compute_witness(&all_checkpoint_updates[0], &mut zk_service_state);
         let base_proof_0 = circuit.circuit_data.prove(pw).unwrap();
-        head = hash_commitment(&all_checkpoint_updates[0], batch_size, &head);
-        let pw = circuit.apply_bundle_and_compute_witness(
-            &all_checkpoint_updates[1],
-            &mut zk_service_state,
-            &head,
-        );
+        let pw = circuit
+            .apply_bundle_and_compute_witness(&all_checkpoint_updates[1], &mut zk_service_state);
         let base_proof_1 = circuit.circuit_data.prove(pw).unwrap();
 
         let compressed_circuit = CompressedCircuit::new(&circuit.circuit_data, 2);
@@ -412,42 +597,43 @@ mod tests {
     #[test]
     fn test_a_possibly_optimal_config() {
         let log_state_size = 30;
-        let bundle_size = 500;
         let batch_size = 25;
-        let sub_bundle_size = 225;
+        let num_batches_per_sub_bundle = 9;
         let branching_factor = 3;
+        let num_compression_levels = 1;
+        // sub_bundle_size = batch_size * num_batches_per_sub_bundle = 225
+        // bundle_size = sub_bundle_size * branching_factor = 675
 
-        assert!(sub_bundle_size % batch_size == 0);
-        let three_step_circuit = ThreeStepMinnowMTCircuits::new(
+        let minnow_b_circuits = MinnowBCircuits::new(
             log_state_size,
-            bundle_size,
-            sub_bundle_size,
             batch_size,
+            num_batches_per_sub_bundle,
             branching_factor,
+            num_compression_levels,
         );
         println!(
             "Base circuit info: {:?}",
-            three_step_circuit.base_circuit.circuit_info
+            minnow_b_circuits.base_circuit.circuit_info
         );
         println!(
             "Compressed circuit info: {:?}",
-            three_step_circuit.compressed_circuits[0].circuit_info
+            minnow_b_circuits.compressed_circuits[0].circuit_info
         );
         println!(
             "Sequential circuit info: {:?}",
-            three_step_circuit.sequential_circuit.circuit_info
+            minnow_b_circuits.sequential_circuit.circuit_info
         );
 
-        assert_eq!(three_step_circuit.base_circuit.circuit_info.degree_bits, 14);
-        assert_eq!(three_step_circuit.compressed_circuits.len(), 1);
+        assert_eq!(minnow_b_circuits.base_circuit.circuit_info.degree_bits, 14);
+        assert_eq!(minnow_b_circuits.compressed_circuits.len(), 1);
         assert_eq!(
-            three_step_circuit.compressed_circuits[0]
+            minnow_b_circuits.compressed_circuits[0]
                 .circuit_info
                 .degree_bits,
             14
         );
         assert_eq!(
-            three_step_circuit
+            minnow_b_circuits
                 .sequential_circuit
                 .circuit_info
                 .degree_bits,
@@ -456,36 +642,36 @@ mod tests {
     }
 
     #[test]
-    fn test_e2e() {
+    fn test_e2e_big_config() {
         let log_state_size = 20;
         let batch_size = 25;
-        let sub_bundle_size = 225;
+        let num_batches_per_sub_bundle = 9;
         let branching_factor = 3;
-        let bundle_size = sub_bundle_size * branching_factor * branching_factor; // 675
+        let num_compression_levels = 2;
 
-        let three_step_circuit = ThreeStepMinnowMTCircuits::new(
+        let minnow_b_circuits = MinnowBCircuits::new(
             log_state_size,
-            bundle_size,
-            sub_bundle_size,
             batch_size,
+            num_batches_per_sub_bundle,
             branching_factor,
+            num_compression_levels,
         );
-        assert_eq!(three_step_circuit.base_circuit.circuit_info.degree_bits, 14);
-        assert_eq!(three_step_circuit.compressed_circuits.len(), 2);
+        assert_eq!(minnow_b_circuits.base_circuit.circuit_info.degree_bits, 14);
+        assert_eq!(minnow_b_circuits.compressed_circuits.len(), 2);
         assert_eq!(
-            three_step_circuit.compressed_circuits[0]
+            minnow_b_circuits.compressed_circuits[0]
                 .circuit_info
                 .degree_bits,
             14
         );
         assert_eq!(
-            three_step_circuit.compressed_circuits[1]
+            minnow_b_circuits.compressed_circuits[1]
                 .circuit_info
                 .degree_bits,
             14
         );
         assert_eq!(
-            three_step_circuit
+            minnow_b_circuits
                 .sequential_circuit
                 .circuit_info
                 .degree_bits,
@@ -493,26 +679,26 @@ mod tests {
         );
 
         let num_bundles = 3;
-        let num_batches_per_bundle = bundle_size / batch_size;
-        let sample_updates =
-            generate_sample_updates(num_batches_per_bundle * num_bundles, batch_size);
-        let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let mut cur_head = Digest::ZERO;
-
-        let mut prev_sequential_proof = None;
+        let bundles = minnow_b_circuits
+            .config
+            .generate_multiple_sample_bundles(num_bundles);
+        let mut orchestrator = Orchestrator::new(minnow_b_circuits.build_provers(), true);
         for i in 0..num_bundles {
-            let bundle = &sample_updates
-                [i * num_batches_per_bundle..(i + 1) * num_batches_per_bundle]
-                .to_vec();
-            let (new_head, proof) = three_step_circuit.apply_bundle_and_prove(
-                bundle,
-                &mut zk_service_state,
-                &cur_head,
-                prev_sequential_proof,
-                true,
-            );
-            cur_head = new_head;
-            prev_sequential_proof = Some(proof);
+            let bundle = &bundles[i];
+            let proof = orchestrator.compute_proof(bundle);
+            orchestrator.verify_cyclic_proof(proof);
         }
+    }
+
+    #[test]
+    fn test_e2e_small_config() {
+        let config = MinnowBConfig::default();
+        let circuits = MinnowBCircuits::new_with_config(&config);
+        let provers = circuits.build_provers();
+
+        let bundle = config.generate_single_sample_bundle();
+        let mut orchestrator = Orchestrator::new(provers, true);
+        let proof = orchestrator.compute_proof(&bundle);
+        orchestrator.verify_cyclic_proof(proof);
     }
 }

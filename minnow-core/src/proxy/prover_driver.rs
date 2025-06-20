@@ -12,7 +12,7 @@ use tokio::{
 use crate::{
     messages::ProtocolMessage,
     metrics::Metrics,
-    proof_system::{BasicProver, CompressProver},
+    proof_system::{BaseProver, CompressionProver},
     proxy::id_manager::IdManager,
 };
 
@@ -20,8 +20,8 @@ pub struct ProverDriver {
     metrics: Arc<Metrics>,
     rx_primary_to_proxy: Receiver<ProtocolMessage>,
     tx_primary: Sender<ProtocolMessage>,
-    basic_prover: BasicProver,
-    compress_prover: CompressProver,
+    basic_prover: BaseProver,
+    compress_prover: CompressionProver,
     pending: IdManager,
     max_compression_level: u16,
 }
@@ -31,8 +31,8 @@ impl ProverDriver {
         metrics: Arc<Metrics>,
         rx_primary_to_proxy: Receiver<ProtocolMessage>,
         tx_primary: Sender<ProtocolMessage>,
-        basic_prover: BasicProver,
-        compress_prover: CompressProver,
+        basic_prover: BaseProver,
+        compress_prover: CompressionProver,
         max_compression_level: u16,
     ) -> Self {
         Self {

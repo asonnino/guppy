@@ -1,5 +1,5 @@
 use log::debug;
-use minnow_lib::Bundle;
+use minnow_lib::Batch;
 use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::BoolTarget;
 use plonky2::iop::witness::PartialWitness;
@@ -23,6 +23,8 @@ use minnow_lib::utils::common_data_for_recursion;
 use minnow_lib::utils::print_system_info;
 use minnow_lib::utils::CircuitInfo;
 use minnow_lib::utils::{Digest, C, D, F};
+
+pub type Bundle = Vec<Batch>;
 
 pub struct MinnowMTOneStepCircuitConfig {
     pub log_state_size: usize,
