@@ -1,5 +1,5 @@
 [workspace]
-members = ["minnow-mt-plonky2", "minnow-h-plonky2", "minnow-lib", "minnow-core"]
+members = ["minnow-mt-plonky2", "minnow-lib", "minnow-core"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -891,17 +891,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minnow-h-plonky2"
-version = "0.1.0"
-dependencies = [
- "clap",
- "hashbrown 0.14.5",
- "log",
- "minnow-lib",
- "plonky2",
-]
-
-[[package]]
 name = "minnow-lib"
 version = "0.1.0"
 dependencies = [
