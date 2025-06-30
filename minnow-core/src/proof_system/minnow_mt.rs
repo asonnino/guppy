@@ -2,39 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hashbrown::HashMap;
-use minnow_lib::{
-    hash_commitment,
-    utils::{Digest, F},
-    StreamPoint,
-};
-use minnow_mt_plonky2::{
-    merkle::get_initial_root,
-    three_step_circuit::CompressedCircuit,
-    two_step_circuit::{BaseCircuit, CyclicSequentialCircuit},
-    MinnowMTServiceState,
-};
-use plonky2::{
-    field::goldilocks_field::GoldilocksField,
-    hash::hash_types::HashOut,
-    iop::{self, target::Target},
-    plonk::{config::PoseidonGoldilocksConfig, proof::ProofWithPublicInputs},
-    recursion::dummy_circuit::cyclic_base_proof,
-};
+use minnow_mt_plonky2::three_step_circuit::{self, Bundle, MinnowBCircuits, Orchestrator};
+use plonky2::{field::goldilocks_field::GoldilocksField, iop::target::Target};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub type StateUpdate = Vec<StreamPoint>;
-
-#[derive(Debug)]
-pub struct PartialWitness(iop::witness::PartialWitness<GoldilocksField>);
-
-impl From<PartialWitness> for iop::witness::PartialWitness<GoldilocksField> {
+impl From<PartialWitness> for minnow_lib::utils::MyPartialWitness {
     fn from(pw: PartialWitness) -> Self {
         pw.0
     }
 }
 
-impl From<iop::witness::PartialWitness<GoldilocksField>> for PartialWitness {
-    fn from(pw: iop::witness::PartialWitness<GoldilocksField>) -> Self {
+impl From<minnow_lib::utils::MyPartialWitness> for PartialWitness {
+    fn from(pw: minnow_lib::utils::MyPartialWitness) -> Self {
         Self(pw)
     }
 }
@@ -54,196 +33,175 @@ impl<'de> Deserialize<'de> for PartialWitness {
         D: Deserializer<'de>,
     {
         let map = <HashMap<Target, GoldilocksField>>::deserialize(deserializer)?;
-        Ok(Self(iop::witness::PartialWitness { target_values: map }))
+        Ok(Self(minnow_lib::utils::MyPartialWitness {
+            target_values: map,
+        }))
     }
 }
 
-pub type Proof = ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>;
+pub type ProverParameters = three_step_circuit::MinnowBConfig;
+pub type StateUpdate = three_step_circuit::Bundle;
+#[derive(Clone, Debug)]
+pub struct PartialWitness(minnow_lib::utils::MyPartialWitness);
+pub type Proof = minnow_lib::utils::Proof;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ProverParameters {
-    pub log_state_size: usize,
-    pub num_batches_per_base_circuit: usize,
-    pub batch_size: usize,
-    pub total_compression_levels: u16,
-    pub branching_factor: usize,
-}
+pub struct Prover(three_step_circuit::Orchestrator);
 
-impl Default for ProverParameters {
-    fn default() -> Self {
-        Self {
-            log_state_size: 2,
-            num_batches_per_base_circuit: 3,
-            batch_size: 2,
-            total_compression_levels: 3,
-            branching_factor: 2,
-        }
-    }
-}
-
-impl ProverParameters {
-    #[cfg(test)]
-    pub fn new_for_tests() -> Self {
-        Self {
-            log_state_size: 2,
-            num_batches_per_base_circuit: 3,
-            batch_size: 2,
-            total_compression_levels: 3,
-            branching_factor: 2,
-        }
+impl Prover {
+    pub fn new(parameters: &ProverParameters, debug: bool) -> Self {
+        let circuits = MinnowBCircuits::new_with_config(parameters);
+        let provers = circuits.build_provers();
+        let orchestrator = Orchestrator::new(provers, debug);
+        Self(orchestrator)
     }
 
-    fn build_base_circuit(&self) -> BaseCircuit {
-        BaseCircuit::new(
-            self.log_state_size,
-            self.num_batches_per_base_circuit,
-            self.batch_size,
-        )
+    pub fn process_bundle_and_return_base_witnesses(
+        &mut self,
+        bundle: &Bundle,
+    ) -> Vec<PartialWitness> {
+        self.0
+            .process_bundle_and_return_base_witnesses(bundle)
+            .into_iter()
+            .map(PartialWitness)
+            .collect()
     }
 
-    fn build_circuits(&self) -> (BaseCircuit, Vec<CompressedCircuit>, CyclicSequentialCircuit) {
-        // Create the base circuit
-        let base_circuit = self.build_base_circuit();
-
-        // Create the compressed circuits
-        let mut compressed_circuits: Vec<CompressedCircuit> = vec![];
-        for _ in 0..self.total_compression_levels {
-            if let Some(last_circuit_data) = compressed_circuits.last() {
-                let compressed_circuit =
-                    CompressedCircuit::new(&last_circuit_data.circuit_data, self.branching_factor);
-                compressed_circuits.push(compressed_circuit);
-            } else {
-                let compressed_circuit =
-                    CompressedCircuit::new(&base_circuit.circuit_data, self.branching_factor);
-                compressed_circuits.push(compressed_circuit);
-            }
-        }
-
-        // Create the cyclic sequential circuit
-        let root_circuit = compressed_circuits.last().unwrap();
-        let initial_root = get_initial_root(self.log_state_size + 1);
-        let sequential_circuit =
-            CyclicSequentialCircuit::new(&initial_root, &root_circuit.circuit_data);
-
-        (base_circuit, compressed_circuits, sequential_circuit)
+    pub fn compute_base_proof(&mut self, base_witness: PartialWitness) -> Proof {
+        self.0.compute_base_proof(base_witness.into())
     }
 
-    pub fn build_provers(
-        &self,
-    ) -> (
-        PartialWitnessBuilder,
-        BaseProver,
-        CompressionProver,
-        CyclicProver,
-    ) {
-        let base_circuit = self.build_base_circuit();
-        let (base_circuit_clone, compressed_circuits, cyclic_circuit) = self.build_circuits();
-
-        let pw_builder = PartialWitnessBuilder::new(self, base_circuit);
-        let basic_prover = BaseProver::new(base_circuit_clone);
-        let compress_prover = CompressionProver::new(compressed_circuits);
-        let cyclic_prover = CyclicProver::new(cyclic_circuit);
-
-        (pw_builder, basic_prover, compress_prover, cyclic_prover)
-    }
-}
-
-pub struct PartialWitnessBuilder {
-    batch_size: usize,
-    cur_head: HashOut<GoldilocksField>,
-    zk_service_state: MinnowMTServiceState,
-    base_circuit: BaseCircuit,
-}
-
-impl PartialWitnessBuilder {
-    pub fn new(parameters: &ProverParameters, base_circuit: BaseCircuit) -> Self {
-        let log_state_size = parameters.log_state_size;
-        let batch_size = parameters.batch_size;
-        let zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
-        let cur_head = Digest::ZERO;
-
-        Self {
-            batch_size,
-            cur_head,
-            zk_service_state,
-            base_circuit,
-        }
+    pub fn compress_base_proofs(&mut self, base_proofs: &[&Proof], level: usize) -> Proof {
+        self.0.compress_base_proofs(base_proofs, level)
     }
 
-    pub fn build(&mut self, state_update: Vec<StateUpdate>) -> PartialWitness {
-        let new_head = hash_commitment(&state_update, self.batch_size, &self.cur_head);
-        let pw = self.base_circuit.apply_bundle_and_compute_witness(
-            &state_update,
-            &mut self.zk_service_state,
-            &self.cur_head,
-        );
-        self.cur_head = new_head;
-        pw.into()
+    pub fn compute_cyclic_proof(&mut self, compressed_proof: Proof) -> Proof {
+        self.0.compute_cyclic_proof(compressed_proof)
     }
-}
 
-pub fn generate_state_updates(parameters: &ProverParameters) -> Vec<Vec<StateUpdate>> {
-    minnow_lib::utils::generate_multiple_sample_updates(
-        parameters.num_batches_per_base_circuit,
-        parameters.num_batches_per_base_circuit,
-        parameters.batch_size,
-    )
+    pub fn verify_cyclic_proof(&mut self, proof: Proof) {
+        self.0.verify_cyclic_proof(proof)
+    }
 }
 
 #[cfg(test)]
-pub fn sample_state_updates() -> Vec<Vec<StateUpdate>> {
-    let parameters = ProverParameters::new_for_tests();
-    generate_state_updates(&parameters)
+pub fn partial_witnesses_for_tests(parameters: &ProverParameters) -> Vec<PartialWitness> {
+    let mut prover = Prover::new(&parameters, false);
+    let bundle = parameters.generate_single_sample_bundle();
+    prover.process_bundle_and_return_base_witnesses(&bundle)
 }
 
 #[cfg(test)]
-pub fn sample_partial_witness() -> PartialWitness {
-    let parameters = ProverParameters::new_for_tests();
-    let (mut pw_builder, _, _, _) = parameters.build_provers();
-    let state_updates = sample_state_updates().pop().unwrap();
-    pw_builder.build(state_updates)
-}
+pub fn compressed_proofs_for_tests(parameters: &ProverParameters) -> Vec<Proof> {
+    use std::vec;
 
-#[cfg(test)]
-pub fn sample_proof() -> Proof {
-    let parameters = ProverParameters::new_for_tests();
-    let (mut pw_builder, mut basic_prover, _, _) = parameters.build_provers();
-    let state_updates = sample_state_updates().pop().unwrap();
-    let pw = pw_builder.build(state_updates);
-    basic_prover.prove(pw)
+    let mut prover = Prover::new(&parameters, false);
+    let witnesses = partial_witnesses_for_tests(parameters);
+
+    // Compute base proofs
+    let base_proof = witnesses
+        .into_iter()
+        .map(|w| prover.compute_base_proof(w))
+        .collect::<Vec<_>>();
+
+    // Compression level 0
+    let first = base_proof.iter().take(2).collect::<Vec<_>>();
+    let last = base_proof.iter().skip(2).collect::<Vec<_>>();
+    let first = prover.compress_base_proofs(&first, 0);
+    let last = prover.compress_base_proofs(&last, 0);
+
+    vec![first, last]
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::proof_system::{sample_state_updates, ProverParameters};
+    use crate::proof_system::{Prover, ProverParameters};
 
     #[test]
-    fn basic_prover() {
-        let parameters = ProverParameters::new_for_tests();
-        let (mut pw_builder, mut basic_prover, _, _) = parameters.build_provers();
-        let state_updates = sample_state_updates().pop().unwrap();
-        let pw = pw_builder.build(state_updates);
-        let _ = basic_prover.prove(pw);
+    fn compute_base_proof() {
+        let parameters = ProverParameters::default();
+        let debug = true;
+        let mut prover = Prover::new(&parameters, debug);
+        let bundle = parameters.generate_single_sample_bundle();
+        let mut witnesses = prover.process_bundle_and_return_base_witnesses(&bundle);
+
+        let _ = prover.compute_base_proof(witnesses.pop().unwrap());
     }
 
     #[test]
-    fn compress_prover() {
-        let parameters = ProverParameters::new_for_tests();
-        let (mut pw_builder, mut basic_prover, mut compress_prover, _) = parameters.build_provers();
-        let state_updates = sample_state_updates().pop().unwrap();
-        let pw = pw_builder.build(state_updates);
-        let base_proof = basic_prover.prove(pw);
-        let _ = compress_prover.prove(base_proof, 0);
+    fn compress_proof() {
+        let parameters = ProverParameters {
+            branching_factor: 2,
+            ..ProverParameters::default()
+        };
+        let debug = true;
+        let mut prover = Prover::new(&parameters, debug);
+        let bundle = parameters.generate_single_sample_bundle();
+        let witnesses = prover.process_bundle_and_return_base_witnesses(&bundle);
+
+        let base_proof = witnesses
+            .into_iter()
+            .map(|w| prover.compute_base_proof(w))
+            .collect::<Vec<_>>();
+
+        let p = base_proof.iter().take(2).collect::<Vec<_>>();
+        let _ = prover.compress_base_proofs(&p, 0);
     }
 
     #[test]
-    fn cyclic_prover() {
-        let parameters = ProverParameters::new_for_tests();
-        let (mut pw_builder, mut basic_prover, _, mut cyclic_prover) = parameters.build_provers();
-        let state_updates = sample_state_updates().pop().unwrap();
-        let pw = pw_builder.build(state_updates);
-        let base_proof = basic_prover.prove(pw);
-        let _ = cyclic_prover.prove(base_proof);
+    fn multi_level_compression() {
+        let parameters = ProverParameters {
+            branching_factor: 2,
+            ..ProverParameters::default()
+        };
+        let debug = true;
+        let mut prover = Prover::new(&parameters, debug);
+        let bundle = parameters.generate_single_sample_bundle();
+        let witnesses = prover.process_bundle_and_return_base_witnesses(&bundle);
+
+        // Compute base proofs
+        let base_proof = witnesses
+            .into_iter()
+            .map(|w| prover.compute_base_proof(w))
+            .collect::<Vec<_>>();
+
+        // Compression level 0
+        let first = base_proof.iter().take(2).collect::<Vec<_>>();
+        let last = base_proof.iter().skip(2).collect::<Vec<_>>();
+        let first = prover.compress_base_proofs(&first, 0);
+        let last = prover.compress_base_proofs(&last, 0);
+
+        // Compression level 1
+        let _ = prover.compress_base_proofs(&[&first, &last], 1);
+    }
+
+    #[test]
+    fn cyclic_proof() {
+        let parameters = ProverParameters {
+            branching_factor: 2,
+            ..ProverParameters::default()
+        };
+        let debug = true;
+        let mut prover = Prover::new(&parameters, debug);
+        let bundle = parameters.generate_single_sample_bundle();
+        let witnesses = prover.process_bundle_and_return_base_witnesses(&bundle);
+
+        // Compute base proofs
+        let base_proof = witnesses
+            .into_iter()
+            .map(|w| prover.compute_base_proof(w))
+            .collect::<Vec<_>>();
+
+        // Compression level 0
+        let first = base_proof.iter().take(2).collect::<Vec<_>>();
+        let last = base_proof.iter().skip(2).collect::<Vec<_>>();
+        let first = prover.compress_base_proofs(&first, 0);
+        let last = prover.compress_base_proofs(&last, 0);
+
+        // Compression level 1
+        let proof = prover.compress_base_proofs(&[&first, &last], 1);
+
+        // Compute cyclic proof
+        let _ = prover.compute_cyclic_proof(proof);
     }
 }

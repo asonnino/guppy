@@ -1,30 +1,32 @@
-use log::info;
-use minnow_lib::utils::generate_sample_updates;
-use minnow_lib::utils::MyPartialWitness;
-use minnow_lib::Batch;
-use plonky2::hash::hash_types::HashOutTarget;
-use plonky2::iop::witness::PartialWitness;
-use plonky2::iop::witness::WitnessWrite;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::proof::ProofWithPublicInputsTarget;
-use plonky2::recursion::dummy_circuit::cyclic_base_proof;
-use plonky2::with_context;
-
-use crate::merkle::get_initial_root;
-use crate::two_step_circuit::{BaseCircuit, CyclicSequentialCircuit};
-use crate::MinnowMTServiceState;
-
 use hashbrown::HashMap;
+use log::info;
+use minnow_lib::{
+    utils::{generate_sample_updates, CircuitInfo, MyPartialWitness, Proof, C, D, F},
+    Batch,
+};
+use plonky2::{
+    hash::hash_types::HashOutTarget,
+    iop::witness::{PartialWitness, WitnessWrite},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData},
+        proof::ProofWithPublicInputsTarget,
+    },
+    recursion::dummy_circuit::cyclic_base_proof,
+    with_context,
+};
+use serde::{Deserialize, Serialize};
 
-use minnow_lib::utils::CircuitInfo;
-use minnow_lib::utils::{Proof, C, D, F};
+use crate::{
+    merkle::get_initial_root,
+    two_step_circuit::{BaseCircuit, CyclicSequentialCircuit},
+    MinnowMTServiceState,
+};
 
 pub type SubBundle = Vec<Batch>;
 pub type Bundle = Vec<SubBundle>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinnowBConfig {
     pub log_state_size: usize,
     pub batch_size: usize,
@@ -450,7 +452,7 @@ impl BaseProver {
 
     pub fn prove(&mut self, witness: MyPartialWitness) -> Proof {
         let proof = self.circuit.circuit_data.prove(witness).unwrap();
-        debug_assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
+        assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
         proof
     }
 
@@ -471,7 +473,7 @@ impl CompressionProver {
     pub fn prove(&mut self, materials: &[&Proof]) -> Proof {
         let pw = self.circuit.set_inputs(&materials);
         let proof = self.circuit.circuit_data.prove(pw).unwrap();
-        debug_assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
+        assert!(self.circuit.circuit_data.verify(proof.clone()).is_ok());
         proof
     }
 
@@ -511,7 +513,7 @@ impl CyclicProver {
         self.first_proof = false;
         let proof = self.cyclic_circuit.circuit_data.prove(pw).unwrap();
         self.prev_proof = proof.clone();
-        debug_assert!(&self
+        assert!(&self
             .cyclic_circuit
             .circuit_data
             .verify(proof.clone())
@@ -526,12 +528,16 @@ impl CyclicProver {
 
 #[allow(unused_imports)]
 mod tests {
+    use std::time::Instant;
+
+    use minnow_lib::{
+        hash_commitment,
+        utils::{generate_sample_updates, set_log_level, Digest},
+    };
+    use tracing::Level;
+
     use super::*;
     use crate::MinnowMTServiceState;
-    use minnow_lib::hash_commitment;
-    use minnow_lib::utils::{generate_sample_updates, set_log_level, Digest};
-    use std::time::Instant;
-    use tracing::Level;
 
     #[test]
     fn test_compressed_circuit() {

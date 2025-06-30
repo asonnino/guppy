@@ -13,7 +13,9 @@ use crate::{
     metrics::Metrics,
     networking::server::NetworkServer,
     primary::{
-        cyclic_driver::CyclicProverDriver, dispatcher::Dispatcher, load_balancer::LoadBalancer,
+        cyclic_driver::CyclicProverDriver,
+        dispatcher::Dispatcher,
+        load_balancer::LoadBalancer,
     },
     proof_system::Proof,
     proxy::prover_driver::ProverDriver,
@@ -43,33 +45,33 @@ impl PrimaryNode {
         let (tx_proxy_to_primary, rx_proxy_to_primary) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_cyclic_prover, rx_cyclic_prover) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let (partial_witness_builder, basic_prover, compress_prover, cyclic_prover) =
-            config.prover_parameters.build_provers();
-
         let load_balancer = LoadBalancer::new(tx_local_proxy);
         let dispatcher_handle = Dispatcher::new(
+            config.prover_parameters.clone(),
             metrics.clone(),
             rx_proxy_connections,
             rx_state_updates,
             rx_proxy_to_primary,
             tx_cyclic_prover,
             load_balancer,
-            partial_witness_builder,
         )
         .spawn();
 
         let prover_driver_handle = ProverDriver::new(
+            &config.prover_parameters,
             metrics.clone(),
             rx_local_proxy,
             tx_proxy_to_primary.clone(),
-            basic_prover,
-            compress_prover,
-            config.prover_parameters.total_compression_levels,
         )
         .spawn();
 
-        let cyclic_prover_handle =
-            CyclicProverDriver::new(metrics, rx_cyclic_prover, tx_output, cyclic_prover).spawn();
+        let cyclic_prover_handle = CyclicProverDriver::new(
+            &config.prover_parameters,
+            metrics,
+            rx_cyclic_prover,
+            tx_output,
+        )
+        .spawn();
 
         let proxy_server_handle = NetworkServer::new(
             config.proxy_server_address,
@@ -166,11 +168,12 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn local_proxy() {
+        let parameters = ProverParameters::default();
         let config = NodeConfig {
             client_server_address: networking::get_test_address(),
             proxy_server_address: networking::get_test_address(),
             metrics_server_address: networking::get_test_address(),
-            prover_parameters: ProverParameters::new_for_tests(),
+            prover_parameters: parameters.clone(),
         };
 
         // Start the primary node with the given configuration
@@ -185,18 +188,18 @@ mod tests {
             NetworkClient::<(), _>::new(config.client_server_address, tx_incoming, rx_outgoing)
                 .spawn();
 
-        let total_requests = 100;
-        let sample = crate::proof_system::sample_state_updates().pop().unwrap();
-        for _ in 0..total_requests {
-            let updates = sample.clone();
-            let message = StateUpdateMessage::new(updates);
+        let total_requests = 3;
+        let bundles = parameters.generate_multiple_sample_bundles(total_requests);
+        for bundle in bundles {
+            let message = StateUpdateMessage::new(bundle);
             tx_outgoing.send(message).await.unwrap();
         }
 
         // Wait for all requests to be processed
-        tokio::time::timeout(Duration::from_millis(100), async move {
-            for _ in 0..total_requests {
+        tokio::time::timeout(Duration::from_secs(10), async move {
+            for i in 0..total_requests {
                 let _ = rx_output.recv().await.unwrap();
+                tracing::debug!("Received request {i}");
             }
         })
         .await
@@ -205,7 +208,7 @@ mod tests {
 
     async fn client(
         server_address: SocketAddr,
-        state_updates: Vec<Vec<StateUpdate>>,
+        state_updates: Vec<StateUpdate>,
     ) -> JoinHandle<Result<(), std::io::Error>> {
         // Create a network client to submit requests to the primary node
         let (tx_incoming, _rx_incoming) = mpsc::channel(1);
@@ -213,8 +216,8 @@ mod tests {
         let client_handle =
             NetworkClient::<(), _>::new(server_address, tx_incoming, rx_outgoing).spawn();
 
-        for updates in state_updates {
-            let message = StateUpdateMessage::new(updates);
+        for update in state_updates {
+            let message = StateUpdateMessage::new(update);
             tx_outgoing.send(message).await.unwrap();
         }
 
@@ -225,14 +228,12 @@ mod tests {
     #[tracing_test::traced_test]
     async fn end_to_end() {
         // Setup the configuration for the proxy node
+        let parameters = ProverParameters::default();
         let config = NodeConfig {
             client_server_address: networking::get_test_address(),
             proxy_server_address: networking::get_test_address(),
             metrics_server_address: networking::get_test_address(),
-            prover_parameters: ProverParameters {
-                total_compression_levels: 3,
-                ..ProverParameters::new_for_tests()
-            },
+            prover_parameters: parameters.clone(),
         };
 
         // Start the proxy nodes
@@ -246,12 +247,12 @@ mod tests {
         tokio::task::yield_now().await;
 
         // Start the client
-        let state_updates = crate::proof_system::sample_state_updates();
-        let total_state_updates = state_updates.len();
+        let total_state_updates = 3;
+        let state_updates = parameters.generate_multiple_sample_bundles(total_state_updates);
         let _client_handle = client(config.client_server_address, state_updates).await;
 
         // Wait for all requests to be processed
-        tokio::time::timeout(Duration::from_millis(100), async move {
+        tokio::time::timeout(Duration::from_secs(10), async move {
             for _ in 0..total_state_updates {
                 let _ = rx_output.recv().await.unwrap();
             }

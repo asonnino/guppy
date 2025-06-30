@@ -10,39 +10,35 @@ use tokio::{
 };
 
 use crate::{
-    messages::ProtocolMessage,
+    messages::{PartialCompressionProof, ProtocolMessage},
     metrics::Metrics,
-    proof_system::{BaseProver, CompressionProver},
+    proof_system::{Prover, ProverParameters},
     proxy::id_manager::IdManager,
 };
 
 pub struct ProverDriver {
     metrics: Arc<Metrics>,
+    prover: Prover,
     rx_primary_to_proxy: Receiver<ProtocolMessage>,
     tx_primary: Sender<ProtocolMessage>,
-    basic_prover: BaseProver,
-    compress_prover: CompressionProver,
     pending: IdManager,
     max_compression_level: u16,
 }
 
 impl ProverDriver {
     pub fn new(
+        parameters: &ProverParameters,
         metrics: Arc<Metrics>,
         rx_primary_to_proxy: Receiver<ProtocolMessage>,
         tx_primary: Sender<ProtocolMessage>,
-        basic_prover: BaseProver,
-        compress_prover: CompressionProver,
-        max_compression_level: u16,
     ) -> Self {
         Self {
             metrics,
+            prover: Prover::new(parameters, false),
             rx_primary_to_proxy,
             tx_primary,
-            basic_prover,
-            compress_prover,
             pending: IdManager::new(),
-            max_compression_level,
+            max_compression_level: parameters.num_compression_levels as u16,
         }
     }
 
@@ -72,37 +68,46 @@ impl ProverDriver {
                 material,
             } => {
                 let start = Instant::now();
-                let proof = self.basic_prover.prove(material);
+                let proof = self.prover.compute_base_proof(material);
                 let elapsed = start.elapsed();
                 self.metrics.observe_basic_prover_latency(elapsed);
 
-                ProtocolMessage::PartialCompressionProof {
+                ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
                     submission_timestamp,
                     index,
                     compression_level: 0,
-                    proof,
-                }
+                    proofs: vec![proof],
+                })
             }
-            ProtocolMessage::PartialCompressionProof {
+            ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
                 submission_timestamp,
                 index,
                 compression_level,
-                proof,
-            } => {
+                proofs,
+            }) => {
+                tracing::debug!(
+                    "Received partial compression proof for index {index} at level {compression_level}"
+                );
+                let material: Vec<_> = proofs.iter().collect();
                 let start = Instant::now();
-                let proof = self.compress_prover.prove(proof, compression_level);
+                let proof = self
+                    .prover
+                    .compress_base_proofs(&material, compression_level as usize);
                 let elapsed = start.elapsed();
                 self.metrics.observe_compress_prover_latency(elapsed);
 
-                if compression_level < self.max_compression_level {
-                    ProtocolMessage::PartialCompressionProof {
+                if compression_level + 1 < self.max_compression_level {
+                    tracing::debug!(
+                        "Generated partial compression proof for index {index} at level {compression_level}, forwarding for next level"
+                    );
+                    ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
                         submission_timestamp,
                         index,
                         compression_level: compression_level + 1,
-                        proof,
-                    }
+                        proofs: vec![proof],
+                    })
                 } else {
-                    tracing::debug!("Final compression proof for index {index} with compression level {compression_level}");
+                    tracing::info!("Final compression proof for index {index} with compression level {compression_level}");
                     ProtocolMessage::FinalCompressionProof {
                         submission_timestamp,
                         index,

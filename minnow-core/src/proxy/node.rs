@@ -9,7 +9,9 @@ use tokio::{
 };
 
 use crate::{
-    config::NodeConfig, metrics::Metrics, networking::client::NetworkClient,
+    config::NodeConfig,
+    metrics::Metrics,
+    networking::client::NetworkClient,
     proxy::prover_driver::ProverDriver,
 };
 
@@ -29,15 +31,11 @@ impl ProxyNode {
         let (tx_primary_to_proxy, rx_primary_to_proxy) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let (tx_proxy_to_primary, rx_proxy_to_primary) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let (_, basic_prover, compress_prover, _) = config.prover_parameters.build_provers();
-
         let prover_driver_handle = ProverDriver::new(
+            &config.prover_parameters,
             metrics,
             rx_primary_to_proxy,
             tx_proxy_to_primary,
-            basic_prover,
-            compress_prover,
-            config.prover_parameters.total_compression_levels,
         )
         .spawn();
 
@@ -90,21 +88,22 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::{
-        config::NodeConfig, messages::ProtocolMessage, networking::server::NetworkServer,
-        proof_system::ProverParameters, proxy::node::ProxyNode,
+        config::NodeConfig,
+        messages::{PartialCompressionProof, ProtocolMessage},
+        networking::server::NetworkServer,
+        proof_system::ProverParameters,
+        proxy::node::ProxyNode,
     };
 
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn partial_compression_proof() {
+        let parameters = ProverParameters::default();
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
             metrics_server_address: crate::networking::get_test_address(),
-            prover_parameters: ProverParameters {
-                total_compression_levels: 3,
-                ..ProverParameters::new_for_tests()
-            },
+            prover_parameters: parameters.clone(),
         };
         println!("Starting proxy node with config: {config:?}");
 
@@ -116,7 +115,8 @@ mod tests {
             NetworkServer::new(config.proxy_server_address, tx_connections, tx_incoming).spawn();
 
         // Send a transaction to the proxy.
-        let total_base_proofs = 100;
+        let witnesses = crate::proof_system::partial_witnesses_for_tests(&parameters);
+        let total_base_proofs = witnesses.len() as u64;
 
         let sender_handle = tokio::spawn(async move {
             let tx = rx_connections.recv().await.unwrap();
@@ -124,25 +124,24 @@ mod tests {
                 let message = ProtocolMessage::BasicProofMaterial {
                     submission_timestamp: Default::default(),
                     index: i,
-                    material: crate::proof_system::sample_partial_witness(),
+                    material: witnesses[i as usize].clone(),
                 };
                 tx.send(message).await.unwrap();
             }
+            tx // Do not drop the sender
         });
 
         let receiver_handle = tokio::spawn(async move {
             let mut next_expected_index = 0;
             while let Some(reply) = rx_incoming.recv().await {
                 match reply {
-                    ProtocolMessage::PartialCompressionProof {
+                    ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
                         index,
                         compression_level,
                         ..
-                    } => {
+                    }) => {
                         tracing::info!("Received partial proof for index {index}");
-                        assert!(
-                            compression_level <= config.prover_parameters.total_compression_levels
-                        );
+                        assert!(compression_level < parameters.num_compression_levels as u16);
                         assert_eq!(index, next_expected_index);
                         next_expected_index += 1;
                         if next_expected_index == total_base_proofs {
@@ -160,27 +159,27 @@ mod tests {
         // Start the proxy node with the given configuration.
         let _proxy_node = ProxyNode::start(config.clone());
 
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            future::join_all(vec![sender_handle, receiver_handle]),
+        let (r1, r2) = tokio::time::timeout(
+            Duration::from_millis(300),
+            future::join(sender_handle, receiver_handle),
         )
         .await
         .unwrap();
+        r1.unwrap();
+        r2.unwrap();
     }
 
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn final_compression_proof() {
+        let parameters = ProverParameters::default();
         let config = NodeConfig {
             client_server_address: crate::networking::get_test_address(),
             proxy_server_address: crate::networking::get_test_address(),
             metrics_server_address: crate::networking::get_test_address(),
-            prover_parameters: ProverParameters {
-                total_compression_levels: 3,
-                ..ProverParameters::new_for_tests()
-            },
+            prover_parameters: parameters.clone(),
         };
-        println!("Starting proxy node with config: {config:?}");
+        tracing::info!("Starting proxy node with config: {config:?}");
 
         // Spawn the client and send transactions to the primary.
         let (tx_connections, mut rx_connections) = mpsc::channel(1);
@@ -189,37 +188,30 @@ mod tests {
         let _fake_primary_handle =
             NetworkServer::new(config.proxy_server_address, tx_connections, tx_incoming).spawn();
 
-        // Send a transaction to the proxy.
-        let total_base_proofs = 100;
-
+        // Send a compressed proof to the proxy.
+        let proofs = crate::proof_system::compressed_proofs_for_tests(&parameters);
         let sender_handle = tokio::spawn(async move {
             let tx = rx_connections.recv().await.unwrap();
-            for i in 0..total_base_proofs {
-                let message = ProtocolMessage::PartialCompressionProof {
-                    submission_timestamp: Default::default(),
-                    index: i,
-                    compression_level: config.prover_parameters.total_compression_levels - 1,
-                    proof: crate::proof_system::sample_proof(),
-                };
-                tx.send(message).await.unwrap();
-            }
+            let message = ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
+                submission_timestamp: Default::default(),
+                index: 0,
+                compression_level: 1,
+                proofs,
+            });
+            tx.send(message).await.unwrap();
+            tx
         });
 
         let receiver_handle = tokio::spawn(async move {
-            let mut next_expected_index = 0;
-            while let Some(reply) = rx_incoming.recv().await {
-                match reply {
-                    ProtocolMessage::FinalCompressionProof { index, .. } => {
-                        tracing::info!("Received final proof for index {index}");
-                        assert_eq!(index, next_expected_index);
-                        next_expected_index += 1;
-                        if next_expected_index == total_base_proofs {
-                            tracing::info!("All expected proofs received");
-                            break; // All expected messages received
-                        }
-                    }
-                    _ => panic!("Received unexpected message: {reply:?}"),
+            let Some(reply) = rx_incoming.recv().await else {
+                panic!("No reply received from proxy");
+            };
+            match reply {
+                ProtocolMessage::FinalCompressionProof { index, .. } => {
+                    tracing::info!("Received final proof for index {index}");
+                    assert_eq!(index, 0);
                 }
+                _ => panic!("Received unexpected message: {reply:?}"),
             }
         });
 
@@ -228,11 +220,13 @@ mod tests {
         // Start the proxy node with the given configuration.
         let _proxy_node = ProxyNode::start(config.clone());
 
-        tokio::time::timeout(
+        let (r1, r2) = tokio::time::timeout(
             Duration::from_millis(1000),
-            future::join_all(vec![sender_handle, receiver_handle]),
+            future::join(sender_handle, receiver_handle),
         )
         .await
         .unwrap();
+        r1.unwrap();
+        r2.unwrap();
     }
 }

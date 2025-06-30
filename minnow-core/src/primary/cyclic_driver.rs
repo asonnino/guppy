@@ -12,30 +12,30 @@ use tokio::{
 use crate::{
     messages::{ProofIndex, SubmissionTimestamp},
     metrics::Metrics,
-    proof_system::{CyclicProver, Proof},
+    proof_system::{Proof, Prover, ProverParameters},
 };
 
 pub struct CyclicProverDriver {
     metrics: Arc<Metrics>,
+    prover: Prover,
     rx_cyclic_prover: Receiver<(SubmissionTimestamp, ProofIndex, Proof)>,
     tx_output: Sender<Proof>,
-    state: CyclicProver,
     pending: DashMap<ProofIndex, Proof>,
     next_index: ProofIndex,
 }
 
 impl CyclicProverDriver {
     pub fn new(
+        parameters: &ProverParameters,
         metrics: Arc<Metrics>,
         rx_cyclic_prover: Receiver<(SubmissionTimestamp, ProofIndex, Proof)>,
         tx_output: Sender<Proof>,
-        state: CyclicProver,
     ) -> Self {
         Self {
             metrics,
+            prover: Prover::new(parameters, false),
             rx_cyclic_prover,
             tx_output,
-            state,
             pending: DashMap::new(),
             next_index: 0,
         }
@@ -44,15 +44,17 @@ impl CyclicProverDriver {
     pub async fn run(&mut self) {
         while let Some((submission_timestamp, index, material)) = self.rx_cyclic_prover.recv().await
         {
+            tracing::debug!("Received cyclic proof material for index {index}");
             self.pending.insert(index, material);
 
             loop {
                 let Some((_, material)) = self.pending.remove(&self.next_index) else {
                     break;
                 };
+                tracing::debug!("Processing cyclic proof for index {}", self.next_index);
 
                 let start = Instant::now();
-                let proof = self.state.prove(material);
+                let proof = self.prover.compute_cyclic_proof(material);
                 let elapsed = start.elapsed();
                 self.metrics.observe_cyclic_prover_latency(elapsed);
                 self.metrics.observe_total_latency(submission_timestamp);

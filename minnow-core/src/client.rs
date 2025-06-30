@@ -12,12 +12,12 @@ use crate::{
     config::NodeConfig,
     messages::StateUpdateMessage,
     networking::{client::NetworkClient, DEFAULT_CHANNEL_SIZE},
-    proof_system::{self},
 };
 
 pub struct Client {
     config: NodeConfig,
     load: usize,
+    duration: Duration,
     tx_outgoing: mpsc::Sender<StateUpdateMessage>,
     network_client: NetworkClient<(), StateUpdateMessage>,
 }
@@ -25,7 +25,7 @@ pub struct Client {
 impl Client {
     const TARGET_INTERVAL: Duration = Duration::from_millis(100);
 
-    pub fn new(config: NodeConfig, load: usize) -> Self {
+    pub fn new(config: NodeConfig, load: usize, duration: Duration) -> Self {
         let (tx_incoming, _rx_incoming) = mpsc::channel(1); // Unused
         let (tx_outgoing, rx_outgoing) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let address = config.client_server_address;
@@ -34,6 +34,7 @@ impl Client {
         Self {
             config,
             load,
+            duration,
             tx_outgoing,
             network_client,
         }
@@ -48,7 +49,8 @@ impl Client {
         // Prepare the state updates
         tracing::info!("Generating state updates");
         let prover_parameters = &self.config.prover_parameters;
-        let mut state_updates = proof_system::generate_state_updates(prover_parameters);
+        let total_updates = self.load * self.duration.as_secs() as usize;
+        let mut state_updates = prover_parameters.generate_multiple_sample_bundles(total_updates);
 
         // Send updates at a fixed interval
         let updates_per_interval = (self.load + 9) / 10;

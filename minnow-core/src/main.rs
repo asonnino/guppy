@@ -1,7 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use clap::Parser;
 use minnow_core::{
@@ -28,9 +28,10 @@ enum Operation {
     Primary {
         #[clap(long, value_name = "FILE")]
         config_path: String,
-
         #[clap(long, default_value_t = 10, value_name = "LOAD")]
         load: usize,
+        #[clap(long, default_value_t = 120, value_name = "DURATION")]
+        duration: u64,
     },
     Proxy {
         #[clap(long, value_name = "FILE")]
@@ -51,7 +52,11 @@ async fn main() {
 
     let args = Args::parse();
     match args.operation {
-        Operation::Primary { config_path, load } => run_primary_node(config_path, load).await,
+        Operation::Primary {
+            config_path,
+            load,
+            duration,
+        } => run_primary_node(config_path, load, Duration::from_secs(duration)).await,
         Operation::Proxy { config_path } => run_proxy_node(config_path).await,
         Operation::DryRun { load } => dry_run(load).await,
     }
@@ -65,12 +70,12 @@ fn sink_output(mut rx_output: mpsc::Receiver<Proof>) {
     });
 }
 
-async fn run_primary_node(config_path: impl AsRef<Path>, load: usize) {
+async fn run_primary_node(config_path: impl AsRef<Path>, load: usize, duration: Duration) {
     let config = NodeConfig::load(&config_path).expect("Failed to load primary node configuration");
     let (tx_output, rx_output) = tokio::sync::mpsc::channel(1024);
     sink_output(rx_output);
     let primary_handle = PrimaryNode::start(config.clone(), tx_output).join();
-    let client_handle = Client::new(config, load).run();
+    let client_handle = Client::new(config, load, duration).run();
     tokio::join!(primary_handle, client_handle);
 }
 
@@ -95,7 +100,8 @@ async fn dry_run(load: usize) {
 
     tokio::task::yield_now().await; // Ensure tasks are scheduled
 
-    let client_handle = Client::new(config, load).run();
+    let duration = Duration::from_secs(30);
+    let client_handle = Client::new(config, load, duration).run();
 
     tokio::join!(primary_handle, proxy_handle, client_handle);
 }
