@@ -4,7 +4,7 @@
 //! Merkle tree implementation adapted and simplified from Walrus.
 use core::fmt::Debug;
 
-use log::{info, trace, warn};
+use log::{trace, warn};
 use thiserror::Error;
 
 use plonky2::hash::merkle_proofs::MerkleProofTarget;
@@ -168,23 +168,23 @@ pub struct MerkleTree {
     // Just the leaves of the Merkle tree stored in raw form.
     // A raw leaf is of type Vec<F> whereas a hashed one is of type Digest (stored in `nodes`)
     leaves: Vec<MerkleLeaf>,
-    // Number of real leaves in the tree (0 <= real_leaves <= max_leaves)
-    real_leaves: usize,
     // Total number of leaves in the tree
     max_leaves: usize,
     // Total number of levels in the tree
     num_levels: usize,
     // Proof length
     proof_len: usize,
+    // Default leaves
+    default_hashes: Vec<Digest>,
 }
 
 impl MerkleTree {
     pub fn get_num_leaves(&self) -> usize {
-        self.real_leaves
+        self.leaves.len()
     }
 
-    pub fn get_leaf(&self, index: usize) -> &MerkleLeaf {
-        self.leaves.get(index).expect("index out of bounds")
+    pub fn get_leaf(&self, index: usize) -> Option<&MerkleLeaf> {
+        self.leaves.get(index)
     }
 
     pub fn build_from_stream_points(stream_points: &[StreamPoint], num_levels: usize) -> Self {
@@ -194,22 +194,15 @@ impl MerkleTree {
 
     fn build_from_leaves(leaves: &[MerkleLeaf], num_levels: usize) -> Self {
         let max_leaves = 1 << (num_levels - 1);
-        let real_leaves = leaves.len();
-        if real_leaves > max_leaves {
+        if leaves.len() > max_leaves {
             panic!(
                 "number of leaves {} is greater than {}",
-                real_leaves, max_leaves
+                leaves.len(),
+                max_leaves
             );
         }
 
-        // Pad the leaves
-        let mut leaves = leaves.to_vec();
-        leaves.extend(vec![MerkleLeaf::default(); max_leaves - real_leaves]);
-
-        info!(
-            "building Merkle tree over {} items with {} levels",
-            max_leaves, num_levels
-        );
+        let default_hashes = get_default_hashes(num_levels);
 
         // Create the capacity that we know will be needed, since the vec will be
         // reused by the call to from_leaf_nodes.
@@ -218,9 +211,10 @@ impl MerkleTree {
             .map(|x| H::hash_or_noop(x.to_arr().as_slice()))
             .collect();
         let mut nodes = Vec::with_capacity(num_levels);
-        nodes.push(hashed_leaves);
+        nodes.push(hashed_leaves); // No padded leaves!
 
         // Fill all other nodes of the Merkle Tree from the bottom up.
+        let mut level = 0;
         while nodes.last().expect("nodes should not be empty").len() > 1 {
             let prev_level_nodes = nodes.last().expect("nodes should not be empty");
             let n_level_nodes = prev_level_nodes.len();
@@ -232,19 +226,20 @@ impl MerkleTree {
                     &prev_level_nodes[index],
                     &prev_level_nodes
                         .get(index + 1)
-                        .expect("we should always have a right child"),
+                        .unwrap_or(&default_hashes[level]),
                 ))
             });
             nodes.push(next_level_nodes);
+            level += 1;
         }
 
         Self {
             nodes,
             leaves: leaves.to_vec(),
-            real_leaves,
             max_leaves,
             num_levels,
             proof_len: num_levels - 1,
+            default_hashes,
         }
     }
 
@@ -255,12 +250,23 @@ impl MerkleTree {
 
     /// Get a copy of the root hash of `self`.
     pub fn root(&self) -> Digest {
-        self.nodes
+        // Handle completely empty tree explicitly
+        if self.get_num_leaves() == 0 {
+            return self.default_hashes[self.num_levels - 1];
+        }
+
+        // Get the single node at the top-most stored level
+        let mut current_hash = self
+            .nodes
             .last()
-            .expect("tree should always have at least one level")
-            .last()
-            .expect("tree should always have at least one leaf")
-            .clone()
+            .expect("tree should always have at least one level")[0];
+
+        // Apply defaults upward until reaching root level
+        for level in self.nodes.len()..self.num_levels {
+            current_hash = inner_hash(&current_hash, &self.default_hashes[level - 1]);
+        }
+
+        current_hash
     }
 
     /// Get the [`MerkleProof`] for the leaf at `leaf_index` consisting
@@ -270,41 +276,45 @@ impl MerkleTree {
             "get_proof: computing Merkle proof for leaf index {}",
             leaf_index
         );
+
         if leaf_index >= self.max_leaves {
             warn!("leaf index out of bounds");
             return Err(LeafIndexOutOfBounds(leaf_index));
         }
+
         let mut path = Vec::with_capacity(self.proof_len);
-        let mut level_index = leaf_index;
-        let mut level = 0;
-        while level < self.num_levels - 1 {
-            let sibling_index = if level_index % 2 == 0 {
-                level_index + 1
+        let mut current_index = leaf_index;
+
+        for level in 0..self.num_levels - 1 {
+            let sibling_index = if current_index % 2 == 0 {
+                current_index + 1
             } else {
-                level_index - 1
+                current_index - 1
             };
-            path.push(
-                self.nodes[level]
-                    .get(sibling_index)
-                    .expect("we should always have a sibling")
-                    .clone(),
-            );
-            // Index of the parent on the next level
-            level_index /= 2;
-            level += 1;
+
+            // Retrieve sibling hash if exists, otherwise use default
+            let sibling_hash = self
+                .nodes
+                .get(level)
+                .and_then(|level_nodes| level_nodes.get(sibling_index))
+                .cloned()
+                .unwrap_or(self.default_hashes[level]);
+
+            path.push(sibling_hash);
+
+            current_index /= 2;
         }
-        assert_eq!(path.len(), self.proof_len);
+
         Ok(MerkleProof { path })
     }
 
     /// Add a new leaf to the tree at the next available index.
-    pub fn add_leaf(&mut self, leaf: &StreamPoint) -> usize {
-        let idx = self.real_leaves;
+    pub fn add_leaf(&mut self, leaf: &StreamPoint) -> Result<usize, LeafIndexOutOfBounds> {
+        let idx = self.get_num_leaves();
         trace!("adding leaf {:#?} at index {}", leaf.id, idx);
-        self.update_leaf(idx, leaf)
-            .expect("leaf index should be in bounds");
-        self.real_leaves += 1;
-        idx
+        self.leaves.push(leaf.encode());
+        self.update_leaf_hash(idx, H::hash_or_noop(&self.leaves[idx].to_arr()))?;
+        Ok(idx)
     }
 
     /// Update the leaf at `leaf_index` to have the provided digest.
@@ -318,27 +328,54 @@ impl MerkleTree {
             warn!("leaf index out of bounds");
             return Err(LeafIndexOutOfBounds(leaf_index));
         }
-        // Update the leaf node.
-        self.nodes[0][leaf_index] = leaf_hash;
-        // Update all the inner nodes on the path to the root.
-        let mut level = 1;
-        let mut level_index = leaf_index / 2;
-        while level < self.num_levels {
-            let prev_level_nodes = &self.nodes[level - 1];
-            let new_digest = inner_hash(
-                &prev_level_nodes[level_index * 2],
-                &prev_level_nodes
-                    .get(level_index * 2 + 1)
-                    .expect("we should always have a right child"),
-            );
-            if self.nodes[level].len() <= level_index {
-                self.nodes[level].push(new_digest);
-            } else {
-                self.nodes[level][level_index] = new_digest;
-            }
-            level_index /= 2;
-            level += 1;
+
+        // Ensure the leaf level vector has enough space
+        if self.nodes[0].len() <= leaf_index {
+            self.nodes[0].resize(leaf_index + 1, self.default_hashes[0]);
         }
+
+        // Update the leaf node
+        self.nodes[0][leaf_index] = leaf_hash;
+
+        // Update all inner nodes along the path to the root
+        let mut current_hash = leaf_hash;
+        let mut current_index = leaf_index;
+
+        for level in 1..self.num_levels {
+            let sibling_index = if current_index % 2 == 0 {
+                current_index + 1
+            } else {
+                current_index - 1
+            };
+
+            // Fetch sibling hash or default
+            let sibling_hash = self
+                .nodes
+                .get(level - 1)
+                .and_then(|level_nodes| level_nodes.get(sibling_index))
+                .cloned()
+                .unwrap_or(self.default_hashes[level - 1]);
+
+            let (left, right) = if current_index % 2 == 0 {
+                (current_hash, sibling_hash)
+            } else {
+                (sibling_hash, current_hash)
+            };
+
+            current_hash = inner_hash(&left, &right);
+            current_index /= 2;
+
+            // Ensure the vector at this level has sufficient size
+            if self.nodes.len() <= level {
+                self.nodes.push(vec![]);
+            }
+            if self.nodes[level].len() <= current_index {
+                self.nodes[level].resize(current_index + 1, self.default_hashes[level]);
+            }
+
+            self.nodes[level][current_index] = current_hash;
+        }
+
         Ok(())
     }
 
@@ -366,7 +403,7 @@ pub(crate) fn leaf_hash(input: &StreamPoint) -> Digest {
     H::hash_or_noop(&input.encode().to_arr())
 }
 
-fn inner_hash(left: &Digest, right: &Digest) -> Digest {
+pub(crate) fn inner_hash(left: &Digest, right: &Digest) -> Digest {
     H::two_to_one(left.clone(), right.clone())
 }
 
@@ -378,6 +415,24 @@ pub fn get_initial_root(num_levels: usize) -> Digest {
         height_diff -= 1;
     }
     h
+}
+
+pub fn get_default_hashes(num_levels: usize) -> Vec<Digest> {
+    assert!(num_levels > 0, "Tree must have at least one level.");
+
+    // Compute default hashes per level, starting with the default leaf hash.
+    let default_leaf = MerkleLeaf::default();
+    let mut default_hashes = Vec::with_capacity(num_levels);
+
+    let mut current_hash = H::hash_or_noop(&default_leaf.to_arr());
+    default_hashes.push(current_hash);
+
+    // Compute defaults for upper levels by repeatedly hashing the previous hash.
+    for _ in 1..num_levels {
+        current_hash = inner_hash(&current_hash, &current_hash);
+        default_hashes.push(current_hash);
+    }
+    default_hashes
 }
 
 #[cfg(test)]
@@ -466,6 +521,9 @@ mod test {
     fn test_merkle_tree_empty() {
         let mt: MerkleTree = MerkleTree::build_from_stream_points(&[], NUM_LEVELS);
         assert_eq!(mt.root(), get_initial_root(NUM_LEVELS));
+        let default_hashes = get_default_hashes(NUM_LEVELS);
+        assert_eq!(mt.default_hashes, default_hashes);
+        assert_eq!(mt.root(), default_hashes[NUM_LEVELS - 1]);
     }
 
     #[test]
@@ -540,5 +598,25 @@ mod test {
                 assert!(!proof.verify_proof(&mt.root(), leaf_data, index + 1));
             }
         }
+    }
+
+    #[test]
+    fn test_add_leaf_sequentially_fixed() {
+        let num_levels = 4;
+        let mut mt = MerkleTree::build_from_stream_points(&[], num_levels);
+
+        // Add first leaf
+        let leaf1 = StreamPoint::default();
+        let idx1 = mt.add_leaf(&leaf1).unwrap();
+        assert_eq!(idx1, 0);
+        assert_eq!(mt.get_num_leaves(), 1);
+        assert_eq!(mt.leaves.len(), 1);
+
+        // Add second leaf
+        let leaf2 = StreamPoint::default();
+        let idx2 = mt.add_leaf(&leaf2).unwrap();
+        assert_eq!(idx2, 1);
+        assert_eq!(mt.get_num_leaves(), 2);
+        assert_eq!(mt.leaves.len(), 2);
     }
 }

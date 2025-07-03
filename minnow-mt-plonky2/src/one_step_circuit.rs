@@ -316,7 +316,7 @@ mod tests {
         let all_updates = generate_sample_updates(total_num_batches, batch_size);
         for c in 0..num_checkpoints {
             let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
-            let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head);
+            let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head).unwrap();
             let pw = circuit.apply_bundle_and_compute_witness(
                 c,
                 &checkpoint_updates,

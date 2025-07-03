@@ -21,6 +21,8 @@ use plonky2::hash::hash_types::HashOutTarget;
 use plonky2::iop::target::Target;
 use plonky2::with_context;
 
+use crate::merkle::MerkleLeaf;
+
 pub const DEFAULT_BATCH_SIZE: usize = 50;
 
 #[derive(Debug)]
@@ -77,7 +79,7 @@ impl MinnowMTServiceState {
         if idx.is_none() {
             assert!(point.new, "point is new but point.new is false");
             // If the stream point is not in the tree, add it
-            let idx = self.merkle_tree.add_leaf(point);
+            let idx = self.merkle_tree.add_leaf(point).unwrap();
             self.stream_id_to_idx.insert(point.id, idx);
         } else {
             assert!(!point.new, "point is old but point.new is true");
@@ -105,7 +107,8 @@ impl MinnowMTServiceState {
 
         let proof = self.get_proof(index);
         let root = self.merkle_tree.root();
-        let leaf = self.merkle_tree.get_leaf(index);
+        let default_leaf = MerkleLeaf::default();
+        let leaf = self.merkle_tree.get_leaf(index).unwrap_or(&default_leaf);
         proof.set_proof_targets(pw, targets, &root, &leaf, index);
     }
 }
