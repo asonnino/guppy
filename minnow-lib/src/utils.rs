@@ -116,6 +116,19 @@ pub fn generate_sample_updates(
     all_updates
 }
 
+// Meant to be used for testing / benchmarking.
+pub fn generate_random_batches(num_batches: usize, batch_size: usize) -> Vec<Batch> {
+    let mut batches = Vec::new();
+    for _ in 0..num_batches {
+        let mut batch = Vec::new();
+        for _ in 0..batch_size {
+            batch.push(StreamPoint::random());
+        }
+        batches.push(batch);
+    }
+    batches
+}
+
 // Plonky2 utils begin
 pub const D: usize = 2;
 pub type C = PoseidonGoldilocksConfig;
@@ -164,6 +177,7 @@ pub fn common_data_for_recursion(
 }
 
 mod test {
+    use super::*;
 
     #[test]
     fn test_common_data_for_recursion_basic() {

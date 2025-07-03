@@ -8,3 +8,12 @@ plonky2.workspace = true
 env_logger.workspace = true
 log.workspace = true
 serde.workspace = true
+rand = "0.9.1"
+crossbeam = "0.8"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "hash_commitment"
+harness = false
