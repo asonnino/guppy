@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use minnow_lib::utils::{generate_sample_updates, Digest};
+use minnow_lib::utils::generate_sample_updates;
 use minnow_mt_plonky2::{two_step_circuit::BaseCircuit, MinnowMTServiceState};
 use std::collections::HashMap;
 
@@ -11,7 +11,7 @@ fn find_configs() -> Vec<(usize, (usize, usize, BaseCircuit))> {
     let step = 100;
     let mut configs = HashMap::new();
     for num_checkpoint_updates in (100..=1000).step_by(step) {
-        let circuit = BaseCircuit::new(log_state_sizes, num_checkpoint_updates);
+        let circuit = BaseCircuit::new(log_state_sizes, 1, num_checkpoint_updates);
         // Insert the config if it is not already in the map.
         if !configs.contains_key(&circuit.circuit_info.degree_bits) {
             configs.insert(
@@ -41,12 +41,8 @@ fn bench_prover(c: &mut Criterion) {
         );
         let mut zk_service_state = MinnowMTServiceState::new(&[], log_state_size);
         let all_checkpoint_updates = generate_sample_updates(1, num_checkpoint_updates);
-        let old_head = Digest::ZERO;
-        let pw = circuit.apply_checkpoint_updates_and_set_inputs(
-            &all_checkpoint_updates[0],
-            &mut zk_service_state,
-            &old_head,
-        );
+        let pw = circuit
+            .apply_bundle_and_compute_witness(&all_checkpoint_updates, &mut zk_service_state);
 
         c.bench_function(format!("circuit_{}", degree).as_str(), |b| {
             b.iter(|| {
