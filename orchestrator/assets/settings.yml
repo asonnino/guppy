@@ -8,5 +8,5 @@ regions:
 specs: m5d.8xlarge
 repository:
   url: https://<GITHUB_TOKEN>@github.com/mystenlabs/minnow.git
-  commit: orchestrator
+  commit: blocking
 target_configs_path: "./orchestrator/assets/target_configs.yml"

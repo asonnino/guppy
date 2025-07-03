@@ -41,7 +41,8 @@ impl CyclicProverDriver {
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(mut self) {
+        let mut prover = self.prover;
         while let Some((submission_timestamp, index, material)) = self.rx_cyclic_prover.recv().await
         {
             tracing::debug!("Received cyclic proof material for index {index}");
@@ -54,20 +55,28 @@ impl CyclicProverDriver {
                 tracing::debug!("Processing cyclic proof for index {}", self.next_index);
 
                 let start = Instant::now();
-                let proof = self.prover.compute_cyclic_proof(material);
+                let (prover_returner, proof) = tokio::task::spawn_blocking(move || {
+                    let proof = prover.compute_cyclic_proof(material);
+                    (prover, proof)
+                })
+                .await // Ensure tasks are executed sequentially
+                .expect("Failed to compute cyclic proof");
+
                 let elapsed = start.elapsed();
                 self.metrics.observe_cyclic_prover_latency(elapsed);
                 self.metrics.observe_total_latency(submission_timestamp);
 
                 tracing::info!("Cyclic proof generated for index {}", self.next_index);
                 self.metrics.state_updates_completed(1);
+
+                prover = prover_returner;
                 self.next_index += 1;
                 let _ = self.tx_output.send(proof).await;
             }
         }
     }
 
-    pub fn spawn(mut self) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             self.run().await;
         })

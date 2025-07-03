@@ -1,6 +1,15 @@
 - proxies: 5
   load: 2
   duration: 600
+  prover_parameters:
+      log_state_size: 10
+      batch_size: 10
+      num_batches_per_sub_bundle: 2
+      branching_factor: 2
+      num_compression_levels: 2
+      bundle_size: 80
+      sub_bundle_size: 20
+      num_sub_bundles: 40
 
 - proxies: 2
   load: 2

@@ -314,7 +314,7 @@ impl NodeExporter {
         );
 
         [
-            "(sudo systemctl status node_exporter && exit 0)",
+            // "(sudo systemctl status node_exporter && exit 0)",
             &format!("curl -LO {source}"),
             &format!(
                 "tar -xvf node_exporter-{}.linux-amd64.tar.gz",
@@ -345,8 +345,8 @@ impl NodeExporter {
             "Description=Node Exporter",
             "After=network.target",
             "[Service]",
-            "User=ubuntu",
-            "Group=ubuntu",
+            "User=node_exporter",
+            "Group=node_exporter",
             "Type=simple",
             &format!(
                 "ExecStart=/usr/local/bin/node_exporter --web.listen-address=:{}",
