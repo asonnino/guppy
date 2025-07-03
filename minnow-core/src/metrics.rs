@@ -8,14 +8,8 @@ use std::{
 
 use axum::{http::StatusCode, routing::get, Extension, Router};
 use prometheus::{
-    register_histogram_vec_with_registry,
-    register_int_counter_with_registry,
-    register_int_gauge_with_registry,
-    HistogramVec,
-    IntCounter,
-    IntGauge,
-    Registry,
-    TextEncoder,
+    register_histogram_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry, HistogramVec, IntCounter, IntGauge, Registry, TextEncoder,
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 

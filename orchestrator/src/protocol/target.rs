@@ -9,18 +9,13 @@ use std::{
 };
 
 use minnow_core::config::{
-    DEFAULT_CLIENT_SERVER_PORT,
-    DEFAULT_METRICS_SERVER_PORT,
-    DEFAULT_PROXY_SERVER_PORT,
+    DEFAULT_CLIENT_SERVER_PORT, DEFAULT_METRICS_SERVER_PORT, DEFAULT_PROXY_SERVER_PORT,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{ProtocolCommands, ProtocolMetrics, ProtocolParameters, BINARY_PATH};
 use crate::{
-    benchmark::BenchmarkParameters,
-    client::Instance,
-    collector::MetricLabel,
-    settings::Settings,
+    benchmark::BenchmarkParameters, client::Instance, collector::MetricLabel, settings::Settings,
 };
 
 const TARGET_CONFIG_FILE: &str = "target_configs.yaml";

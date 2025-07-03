@@ -11,12 +11,8 @@ use tokio::{
 
 use crate::{
     messages::{
-        PartialCompressionProof,
-        PartialCompressionProofAggregator,
-        ProofIndex,
-        ProtocolMessage,
-        StateUpdateMessage,
-        SubmissionTimestamp,
+        PartialCompressionProof, PartialCompressionProofAggregator, ProofIndex, ProtocolMessage,
+        StateUpdateMessage, SubmissionTimestamp,
     },
     metrics::Metrics,
     primary::load_balancer::LoadBalancer,

@@ -15,7 +15,12 @@ fn bench_hash_commitment_varying_batch_sizes(c: &mut Criterion) {
                 &format!("updates_{}_batch_size_{}", total_num_updates, batch_size),
                 |b| {
                     b.iter(|| {
-                        hash_commitment_parallel(black_box(&updates), black_box(batch_size as usize), black_box(&prev_head), None)
+                        hash_commitment_parallel(
+                            black_box(&updates),
+                            black_box(batch_size as usize),
+                            black_box(&prev_head),
+                            None,
+                        )
                     })
                 },
             );
@@ -41,46 +46,50 @@ fn bench_hash_commitment_varying_num_batches(c: &mut Criterion) {
         //     },
         // );
 
-        group.bench_function(
-            &format!("parallel_num_batches_{}", num_batches),
-            |b| {
-                b.iter(|| {
-                    hash_commitment_parallel(black_box(&updates), black_box(batch_size), black_box(&prev_head), black_box(None))
-                })
-            },
-        );
+        group.bench_function(&format!("parallel_num_batches_{}", num_batches), |b| {
+            b.iter(|| {
+                hash_commitment_parallel(
+                    black_box(&updates),
+                    black_box(batch_size),
+                    black_box(&prev_head),
+                    black_box(None),
+                )
+            })
+        });
     }
     group.finish();
 }
 
 fn bench_hash_commitment_thread_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("hash_commitment_thread_scaling");
-    
+
     let updates = generate_random_batches(100, 50);
     let batch_size = 50;
     let prev_head = Digest::ZERO;
 
     // Test with different thread counts
     for thread_count in [1, 2, 4, 8] {
-        group.bench_function(
-            &format!("parallel_{}_threads", thread_count),
-            |b| {
-                b.iter(|| {
-                    hash_commitment_parallel(
-                        black_box(&updates), 
-                        black_box(batch_size), 
-                        black_box(&prev_head),
-                        black_box(Some(thread_count))
-                    )
-                })
-            },
-        );
+        group.bench_function(&format!("parallel_{}_threads", thread_count), |b| {
+            b.iter(|| {
+                hash_commitment_parallel(
+                    black_box(&updates),
+                    black_box(batch_size),
+                    black_box(&prev_head),
+                    black_box(Some(thread_count)),
+                )
+            })
+        });
     }
 
     // Also test the unlimited version for comparison
     group.bench_function("parallel_unlimited_threads", |b| {
         b.iter(|| {
-            hash_commitment_parallel(black_box(&updates), black_box(batch_size), black_box(&prev_head), None)
+            hash_commitment_parallel(
+                black_box(&updates),
+                black_box(batch_size),
+                black_box(&prev_head),
+                None,
+            )
         })
     });
 
@@ -93,4 +102,4 @@ criterion_group!(
     bench_hash_commitment_varying_num_batches,
     bench_hash_commitment_thread_scaling
 );
-criterion_main!(benches); 
+criterion_main!(benches);

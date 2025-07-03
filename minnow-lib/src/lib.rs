@@ -1,5 +1,6 @@
 pub mod utils;
 
+use crossbeam::thread;
 use plonky2::{
     field::types::Field,
     hash::hash_types::HashOutTarget,
@@ -12,7 +13,6 @@ use plonky2::{
 use rand::{Rng, TryRngCore};
 use serde::{Deserialize, Serialize};
 use utils::{Digest, MyCircuitBuilder as CircuitBuilder, MyPartialWitness as PartialWitness, F, H};
-use crossbeam::thread;
 
 pub const DEFAULT_NUM_THREADS: usize = 4;
 
@@ -48,11 +48,7 @@ impl StreamPoint {
         rng.try_fill_bytes(&mut id).unwrap();
         rng.try_fill_bytes(&mut digest).unwrap();
         let new = rng.random_bool(0.5);
-        Self {
-            id,
-            digest,
-            new,
-        }
+        Self { id, digest, new }
     }
 
     pub fn new(id: StreamID, digest: StreamVal) -> Self {
@@ -194,14 +190,14 @@ fn compute_batch_commitments_parallel(
     max_threads: Option<usize>,
 ) -> Result<Vec<Digest>, String> {
     let max_threads = max_threads.unwrap_or(DEFAULT_NUM_THREADS);
-    
+
     thread::scope(|s| {
         let mut handles = Vec::new();
-        
+
         // Process batches in chunks to limit concurrent threads
         for chunk in updates.chunks(max_threads) {
             let mut chunk_handles = Vec::new();
-            
+
             for batch in chunk {
                 let batch = batch.clone();
                 let handle = s.spawn(move |_| {
@@ -220,20 +216,25 @@ fn compute_batch_commitments_parallel(
                 });
                 chunk_handles.push(handle);
             }
-            
+
             // Wait for current chunk to complete before starting next chunk
             for handle in chunk_handles {
-                handles.push(handle.join().map_err(|e| format!("Thread join error: {:?}", e))?);
+                handles.push(
+                    handle
+                        .join()
+                        .map_err(|e| format!("Thread join error: {:?}", e))?,
+                );
             }
         }
-        
+
         // Collect all results, returning early if any error occurs
         let mut results = Vec::new();
         for result in handles {
             results.push(result?);
         }
         Ok(results)
-    }).unwrap()
+    })
+    .unwrap()
 }
 
 pub fn hash_commitment(
@@ -338,7 +339,10 @@ mod tests {
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical for small batches");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical for small batches"
+        );
     }
 
     #[test]
@@ -350,7 +354,10 @@ mod tests {
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical for medium batches");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical for medium batches"
+        );
     }
 
     #[test]
@@ -362,16 +369,20 @@ mod tests {
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical for large batches");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical for large batches"
+        );
     }
 
     #[test]
     fn test_hash_commitment_with_padding() {
         let mut updates = generate_random_batches(3, 50);
-        
+
         // Add a batch that's smaller than batch_size to test padding
         let mut small_batch = Vec::new();
-        for i in 0..25 { // Smaller than batch_size
+        for i in 0..25 {
+            // Smaller than batch_size
             let stream_id = {
                 let mut id = [0u8; 32];
                 id[0] = i as u8;
@@ -385,14 +396,17 @@ mod tests {
             small_batch.push(StreamPoint::new(stream_id, digest));
         }
         updates.push(small_batch);
-        
+
         let batch_size = 50;
         let prev_head = Digest::ZERO;
 
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical with padding");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical with padding"
+        );
     }
 
     #[test]
@@ -404,11 +418,17 @@ mod tests {
         // Test that both functions are deterministic
         let result1_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result2_seq = hash_commitment(&updates, batch_size, &prev_head);
-        assert_eq!(result1_seq, result2_seq, "Sequential function should be deterministic");
+        assert_eq!(
+            result1_seq, result2_seq,
+            "Sequential function should be deterministic"
+        );
 
         let result1_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
         let result2_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
-        assert_eq!(result1_par, result2_par, "Parallel function should be deterministic");
+        assert_eq!(
+            result1_par, result2_par,
+            "Parallel function should be deterministic"
+        );
     }
 
     #[test]
@@ -420,8 +440,15 @@ mod tests {
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical for empty updates");
-        assert_eq!(result_seq, Ok(prev_head), "Empty updates should return the previous head");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical for empty updates"
+        );
+        assert_eq!(
+            result_seq,
+            Ok(prev_head),
+            "Empty updates should return the previous head"
+        );
     }
 
     #[test]
@@ -433,14 +460,17 @@ mod tests {
         let result_seq = hash_commitment(&updates, batch_size, &prev_head);
         let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
 
-        assert_eq!(result_seq, result_par, "Sequential and parallel results should be identical for single batch");
+        assert_eq!(
+            result_seq, result_par,
+            "Sequential and parallel results should be identical for single batch"
+        );
     }
 
     #[test]
     fn test_hash_commitment_different_prev_heads() {
         let updates = generate_random_batches(3, 20);
         let batch_size = 20;
-        
+
         let prev_head1 = Digest::ZERO;
         let prev_head2 = {
             let mut digest = Digest::ZERO;
@@ -450,14 +480,23 @@ mod tests {
 
         let result1_seq = hash_commitment(&updates, batch_size, &prev_head1);
         let result1_par = hash_commitment_parallel(&updates, batch_size, &prev_head1, None);
-        assert_eq!(result1_seq, result1_par, "Results should be identical for prev_head1");
+        assert_eq!(
+            result1_seq, result1_par,
+            "Results should be identical for prev_head1"
+        );
 
         let result2_seq = hash_commitment(&updates, batch_size, &prev_head2);
         let result2_par = hash_commitment_parallel(&updates, batch_size, &prev_head2, None);
-        assert_eq!(result2_seq, result2_par, "Results should be identical for prev_head2");
+        assert_eq!(
+            result2_seq, result2_par,
+            "Results should be identical for prev_head2"
+        );
 
         // Results should be different for different prev_heads
-        assert_ne!(result1_seq, result2_seq, "Results should be different for different prev_heads");
+        assert_ne!(
+            result1_seq, result2_seq,
+            "Results should be different for different prev_heads"
+        );
     }
 
     #[test]
@@ -466,12 +505,15 @@ mod tests {
         // Make one batch larger than the specified batch_size
         updates[0].push(StreamPoint::random());
         updates[0].push(StreamPoint::random());
-        
+
         let batch_size = 10;
         let prev_head = Digest::ZERO;
 
         let result = hash_commitment(&updates, batch_size, &prev_head);
-        assert!(result.is_err(), "Hash commitment should return an error for a batch that's too large");
+        assert!(
+            result.is_err(),
+            "Hash commitment should return an error for a batch that's too large"
+        );
     }
 
     #[test]
@@ -480,12 +522,15 @@ mod tests {
         // Make one batch larger than the specified batch_size
         updates[0].push(StreamPoint::random());
         updates[0].push(StreamPoint::random());
-        
+
         let batch_size = 10;
         let prev_head = Digest::ZERO;
 
         let result = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
-        assert!(result.is_err(), "Hash commitment should return an error for a batch that's too large");
+        assert!(
+            result.is_err(),
+            "Hash commitment should return an error for a batch that's too large"
+        );
     }
 
     #[test]
@@ -497,11 +542,13 @@ mod tests {
         // Test with different thread counts
         for thread_count in [1, 2, 4, 8] {
             let result_seq = hash_commitment(&updates, batch_size, &prev_head);
-            let result_par = hash_commitment_parallel(&updates, batch_size, &prev_head, Some(thread_count));
-            
+            let result_par =
+                hash_commitment_parallel(&updates, batch_size, &prev_head, Some(thread_count));
+
             assert_eq!(
-                result_seq, result_par, 
-                "Thread-limited parallel result should match sequential for {} threads", thread_count
+                result_seq, result_par,
+                "Thread-limited parallel result should match sequential for {} threads",
+                thread_count
             );
         }
     }
@@ -514,9 +561,9 @@ mod tests {
 
         let result_unlimited = hash_commitment_parallel(&updates, batch_size, &prev_head, None);
         let result_limited = hash_commitment_parallel(&updates, batch_size, &prev_head, Some(4));
-        
+
         assert_eq!(
-            result_unlimited, result_limited, 
+            result_unlimited, result_limited,
             "Thread-limited and unlimited parallel results should be identical"
         );
     }

@@ -12,9 +12,7 @@ use tokio::{
 };
 
 use crate::{
-    config::NodeConfig,
-    metrics::Metrics,
-    networking::client::NetworkClient,
+    config::NodeConfig, metrics::Metrics, networking::client::NetworkClient,
     proxy::prover_driver::ProverDriver,
 };
 

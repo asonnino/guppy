@@ -165,7 +165,8 @@ impl BaseCircuit {
             &bundle,
             self.config.batch_size,
             &zk_service_state.get_head(),
-        ).unwrap();
+        )
+        .unwrap();
         zk_service_state.update_head(&new_head);
 
         pw

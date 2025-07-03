@@ -29,7 +29,8 @@ pub fn set_log_level(level: log::LevelFilter) {
 }
 
 pub fn are_two_vectors_equal(
-    a: &[Target], b: &[Target],
+    a: &[Target],
+    b: &[Target],
     builder: &mut MyCircuitBuilder,
 ) -> BoolTarget {
     assert_eq!(a.len(), b.len());
@@ -42,24 +43,14 @@ pub fn are_two_vectors_equal(
     result
 }
 
-pub fn print_system_info(
-    num_levels: usize,
-    num_batches: usize,
-    batch_size: usize,
-) {
+pub fn print_system_info(num_levels: usize, num_batches: usize, batch_size: usize) {
     info!(
         "Max Merkle tree levels: {} ({} elements)",
         num_levels,
         1 << (num_levels - 1)
     );
-    info!(
-        "Number of batches: {}",
-        num_batches
-    );
-    info!(
-        "Number of elements per batch: {}",
-        batch_size
-    );
+    info!("Number of batches: {}", num_batches);
+    info!("Number of elements per batch: {}", batch_size);
 }
 
 // pub fn generate_multiple_sample_updates(
@@ -73,10 +64,7 @@ pub fn print_system_info(
 
 // Test vector: All batches update the same set of stream points
 // [[StreamPoint; batch_size]; num_batches]
-pub fn generate_sample_updates(
-    num_batches: usize,
-    batch_size: usize,
-) -> Vec<Batch> {
+pub fn generate_sample_updates(num_batches: usize, batch_size: usize) -> Vec<Batch> {
     let start_batch_number = 0;
     let mut all_updates = Vec::new();
     let first_set: Vec<StreamPoint> = (0..batch_size)
