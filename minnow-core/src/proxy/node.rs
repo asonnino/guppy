@@ -1,7 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
 
 use tokio::{
     sync::mpsc::{self},
@@ -46,8 +49,10 @@ impl ProxyNode {
         )
         .spawn();
 
+        let unspecified = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        let metrics_address = SocketAddr::new(unspecified, config.metrics_server_address.port());
         let metrics_server_handle =
-            crate::metrics::start_prometheus_server(config.metrics_server_address, &registry);
+            crate::metrics::start_prometheus_server(metrics_address, &registry);
 
         tracing::info!("Proxy node started with config: {config:?}");
         Self {

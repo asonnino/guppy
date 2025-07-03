@@ -1,7 +1,10 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
 
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -24,6 +27,7 @@ use crate::{
 pub const DEFAULT_CHANNEL_SIZE: usize = 100_000;
 
 pub struct PrimaryNode {
+    metrics: Arc<Metrics>,
     dispatcher_handle: JoinHandle<()>,
     prover_driver_handle: JoinHandle<()>,
     cyclic_prover_handle: JoinHandle<()>,
@@ -67,31 +71,28 @@ impl PrimaryNode {
 
         let cyclic_prover_handle = CyclicProverDriver::new(
             &config.prover_parameters,
-            metrics,
+            metrics.clone(),
             rx_cyclic_prover,
             tx_output,
         )
         .spawn();
 
-        let proxy_server_handle = NetworkServer::new(
-            config.proxy_server_address,
-            tx_proxy_connections,
-            tx_proxy_to_primary,
-        )
-        .spawn();
+        let unspecified = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        let proxy_address = SocketAddr::new(unspecified, config.proxy_server_address.port());
+        let proxy_server_handle =
+            NetworkServer::new(proxy_address, tx_proxy_connections, tx_proxy_to_primary).spawn();
 
-        let client_server_handle = NetworkServer::new(
-            config.client_server_address,
-            tx_client_connections,
-            tx_state_updates,
-        )
-        .spawn();
+        let client_address = SocketAddr::new(unspecified, config.client_server_address.port());
+        let client_server_handle =
+            NetworkServer::new(client_address, tx_client_connections, tx_state_updates).spawn();
 
+        let metrics_address = SocketAddr::new(unspecified, config.metrics_server_address.port());
         let metrics_server_handle =
-            crate::metrics::start_prometheus_server(config.metrics_server_address, &registry);
+            crate::metrics::start_prometheus_server(metrics_address, &registry);
 
         tracing::info!("Primary node started with config: {config:?}");
         Self {
+            metrics,
             dispatcher_handle,
             prover_driver_handle,
             cyclic_prover_handle,
@@ -100,6 +101,10 @@ impl PrimaryNode {
             metrics_server_handle,
             rx_client_connections,
         }
+    }
+
+    pub fn metrics(&self) -> Arc<Metrics> {
+        self.metrics.clone()
     }
 
     pub async fn join(mut self) {

@@ -8,8 +8,14 @@ use std::{
 
 use axum::{http::StatusCode, routing::get, Extension, Router};
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_gauge_with_registry, HistogramVec, IntGauge,
-    Registry, TextEncoder,
+    register_histogram_vec_with_registry,
+    register_int_counter_with_registry,
+    register_int_gauge_with_registry,
+    HistogramVec,
+    IntCounter,
+    IntGauge,
+    Registry,
+    TextEncoder,
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 
@@ -27,6 +33,7 @@ pub const PW_BUILDER_LABEL: &str = "pw_builder";
 pub const BASIC_PROVER_LABEL: &str = "basic_prover";
 pub const COMPRESS_PROVER_LABEL: &str = "compress_prover";
 pub const CYCLIC_PROVER_LABEL: &str = "cyclic_prover";
+pub const UPDATES_SUBMITTED: &str = "updates_submitted";
 pub const UPDATES_IN_FLIGHT: &str = "updates_in_flight";
 
 const DEFAULT_WORKLOAD: &str = "default";
@@ -61,6 +68,7 @@ async fn metrics_route(registry: Extension<Registry>) -> (StatusCode, String) {
 pub struct Metrics {
     total_latency_s: HistogramVec,
     provers_latency_s: HistogramVec,
+    updates_submitted: IntCounter,
     updates_in_flight: IntGauge,
 }
 
@@ -80,6 +88,12 @@ impl Metrics {
                 "Buckets measuring the latency of a prover in seconds",
                 &["prover"],
                 LATENCY_SEC_BUCKETS.to_vec(),
+                registry,
+            )
+            .unwrap(),
+            updates_submitted: register_int_counter_with_registry!(
+                UPDATES_SUBMITTED,
+                "Total number of state updates submitted by the client",
                 registry,
             )
             .unwrap(),
@@ -133,6 +147,11 @@ impl Metrics {
     pub fn new_state_updates(&self, count: usize) {
         tracing::debug!("New state updates received: {count}");
         self.updates_in_flight.add(count as i64);
+    }
+
+    pub fn new_updates_submitted(&self, count: usize) {
+        tracing::debug!("New state updates submitted: {count}");
+        self.updates_submitted.inc_by(count as u64);
     }
 
     pub fn state_updates_completed(&self, count: usize) {

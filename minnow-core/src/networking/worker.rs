@@ -157,7 +157,7 @@ where
 
             if num_received == 0 {
                 tracing::warn!(
-                    "[{id}] Cannot receive transaction from application layer, stopping worker"
+                    "[{id}] Cannot receive transaction from application layer, stopping writer"
                 );
                 return Ok(());
             }

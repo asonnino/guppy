@@ -67,10 +67,10 @@ impl MinnowBConfig {
         let bundle_size = sub_bundle_size * (branching_factor.pow(num_compression_levels));
         let num_sub_bundles = bundle_size / sub_bundle_size;
 
-        println!(
-            "num_base_circuits_to_compress / num_sub_bundles: {}",
-            num_sub_bundles
-        );
+        // println!(
+        //     "num_base_circuits_to_compress / num_sub_bundles: {}",
+        //     num_sub_bundles
+        // );
         assert!(branching_factor.pow(num_compression_levels) == num_sub_bundles);
 
         Self {

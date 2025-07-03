@@ -60,6 +60,7 @@ impl CyclicProverDriver {
                 self.metrics.observe_total_latency(submission_timestamp);
 
                 tracing::info!("Cyclic proof generated for index {}", self.next_index);
+                self.metrics.state_updates_completed(1);
                 self.next_index += 1;
                 let _ = self.tx_output.send(proof).await;
             }

@@ -40,6 +40,7 @@ impl<'de> Deserialize<'de> for PartialWitness {
 }
 
 pub type ProverParameters = three_step_circuit::MinnowBConfig;
+
 pub type StateUpdate = three_step_circuit::Bundle;
 #[derive(Clone, Debug)]
 pub struct PartialWitness(minnow_lib::utils::MyPartialWitness);

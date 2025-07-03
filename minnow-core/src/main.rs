@@ -24,6 +24,7 @@ struct Args {
 }
 
 #[derive(Parser)]
+#[clap(rename_all = "kebab-case")]
 enum Operation {
     Primary {
         #[clap(long, value_name = "FILE")]
@@ -64,8 +65,8 @@ async fn main() {
 
 fn sink_output(mut rx_output: mpsc::Receiver<Proof>) {
     tokio::spawn(async move {
-        while let Some(output) = rx_output.recv().await {
-            tracing::info!("Received output from primary node: {output:?}");
+        while let Some(_output) = rx_output.recv().await {
+            tracing::info!("Received output from primary node!");
         }
     });
 }
@@ -74,8 +75,10 @@ async fn run_primary_node(config_path: impl AsRef<Path>, load: usize, duration: 
     let config = NodeConfig::load(&config_path).expect("Failed to load primary node configuration");
     let (tx_output, rx_output) = tokio::sync::mpsc::channel(1024);
     sink_output(rx_output);
-    let primary_handle = PrimaryNode::start(config.clone(), tx_output).join();
-    let client_handle = Client::new(config, load, duration).run();
+    let primary = PrimaryNode::start(config.clone(), tx_output);
+    let metrics = primary.metrics();
+    let primary_handle = primary.join();
+    let client_handle = Client::new(config, load, duration, Some(metrics)).run();
     tokio::join!(primary_handle, client_handle);
 }
 
@@ -101,7 +104,7 @@ async fn dry_run(load: usize) {
     tokio::task::yield_now().await; // Ensure tasks are scheduled
 
     let duration = Duration::from_secs(30);
-    let client_handle = Client::new(config, load, duration).run();
+    let client_handle = Client::new(config, load, duration, None).run();
 
     tokio::join!(primary_handle, proxy_handle, client_handle);
 }

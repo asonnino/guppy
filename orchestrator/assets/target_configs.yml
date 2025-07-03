@@ -1,0 +1,7 @@
+- proxies: 5
+  load: 2
+  duration: 600
+
+- proxies: 2
+  load: 2
+  duration: 60

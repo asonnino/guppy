@@ -111,6 +111,8 @@ impl Dispatcher {
                 },
                 Some(message) = self.rx_state_updates.recv() => {
                     tracing::debug!("Received state update, building proof material");
+                    self.metrics.new_state_updates(1);
+
                     let StateUpdateMessage { submission_timestamp, updates } = message;
                     let start = Instant::now();
                     let witnesses = self.prover.process_bundle_and_return_base_witnesses(&updates);
