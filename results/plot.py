@@ -96,7 +96,7 @@ def extract_p50_prover_names_and_indices(headers):
     """
     Returns a list of (prover_name, column_index) for P50 columns only.
     """
-    pattern = r'prover=""(.*?)"""'
+    pattern = r'prover="(.*?)"'  # Fix regex to two quotes
     prover_info = []
     for idx in range(1, len(headers), 2):  # P50 columns only (1, 3, ...)
         match = re.search(pattern, headers[idx])
@@ -110,15 +110,17 @@ def extract_p50_prover_names_and_indices(headers):
 def process_prover_latency(folder):
     p50_data = {}  # prover_name -> list of p50 values
 
-    for filename in ["primary-latency-breakdown.csv", "proxy-latency-breakdown.csv"]:
+    for filename in ["primary-latency-breakdown.csv", "proxies-latency-breakdown.csv"]:
         path = os.path.join(folder, filename)
         if not os.path.exists(path):
             print(f"Missing file: {path}")
             continue
 
+        print(f"Processing file: {path}")
         try:
             headers, rows = read_column_values(path)
             prover_info = extract_p50_prover_names_and_indices(headers)
+            print(f"Found provers in {filename}: {[p[0] for p in prover_info]}")
 
             for prover_name, col_idx in prover_info:
                 try:
@@ -135,6 +137,7 @@ def process_prover_latency(folder):
     summary = [
         (prover, np.mean(values)) for prover, values in p50_data.items() if values
     ]
+    print(f"Summary for folder {folder}: {summary}")
     return summary
 
 
