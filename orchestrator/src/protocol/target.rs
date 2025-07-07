@@ -7,10 +7,9 @@ use std::{
     path::PathBuf,
 };
 
-use minnow_core::config::{
-    DEFAULT_CLIENT_SERVER_PORT,
-    DEFAULT_METRICS_SERVER_PORT,
-    DEFAULT_PROXY_SERVER_PORT,
+use minnow_core::{
+    config::{DEFAULT_CLIENT_SERVER_PORT, DEFAULT_METRICS_SERVER_PORT, DEFAULT_PROXY_SERVER_PORT},
+    proof_system::ProverParameters,
 };
 use serde::{Deserialize, Serialize};
 
