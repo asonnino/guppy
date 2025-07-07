@@ -53,9 +53,9 @@ impl Client {
         tokio::task::yield_now().await;
 
         // Prepare the state updates
-        tracing::info!("Generating state updates");
         let prover_parameters = &self.config.prover_parameters;
         let total_updates = self.load * self.duration.as_secs() as usize;
+        tracing::info!("Generating {total_updates} batches of state updates");
         let mut state_updates = prover_parameters.generate_multiple_sample_bundles(total_updates);
 
         // Send updates at a fixed interval

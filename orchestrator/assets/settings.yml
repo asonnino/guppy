@@ -5,8 +5,8 @@ token_file: "/Users/${USER}/.aws/credentials"
 ssh_private_key_file: "/Users/${USER}/.ssh/aws"
 regions:
   - us-east-1
-specs: m5d.8xlarge
+specs: m6a.8xlarge
 repository:
   url: https://<GITHUB_TOKEN>@github.com/mystenlabs/minnow.git
-  commit: blocking
+  commit: debug
 target_configs_path: "./orchestrator/assets/target_configs.yml"

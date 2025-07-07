@@ -4,37 +4,36 @@
 use std::{
     fmt::{Debug, Display},
     net::IpAddr,
-    ops::Deref,
     path::PathBuf,
 };
 
 use minnow_core::config::{
-    DEFAULT_CLIENT_SERVER_PORT, DEFAULT_METRICS_SERVER_PORT, DEFAULT_PROXY_SERVER_PORT,
+    DEFAULT_CLIENT_SERVER_PORT,
+    DEFAULT_METRICS_SERVER_PORT,
+    DEFAULT_PROXY_SERVER_PORT,
 };
 use serde::{Deserialize, Serialize};
 
 use super::{ProtocolCommands, ProtocolMetrics, ProtocolParameters, BINARY_PATH};
 use crate::{
-    benchmark::BenchmarkParameters, client::Instance, collector::MetricLabel, settings::Settings,
+    benchmark::BenchmarkParameters,
+    client::Instance,
+    collector::MetricLabel,
+    settings::Settings,
 };
 
 const TARGET_CONFIG_FILE: &str = "target_configs.yaml";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TargetConfigs {
-    #[serde(default)]
-    pub prover_parameters: minnow_core::proof_system::ProverParameters,
+    pub log_state_size: usize,
+    pub branching_factor: usize,
+    pub num_compression_levels: u32,
+    pub batch_size: usize,
+    pub num_batches_per_sub_bundle: usize,
     pub proxies: u16,
     pub load: u16,
     pub duration: u16,
-}
-
-impl Deref for TargetConfigs {
-    type Target = minnow_core::proof_system::ProverParameters;
-
-    fn deref(&self) -> &Self::Target {
-        &self.prover_parameters
-    }
 }
 
 impl Debug for TargetConfigs {
@@ -52,9 +51,13 @@ impl Display for TargetConfigs {
 impl Default for TargetConfigs {
     fn default() -> Self {
         Self {
-            prover_parameters: minnow_core::proof_system::ProverParameters::default(),
+            log_state_size: 10,
+            branching_factor: 2,
+            num_compression_levels: 2,
+            batch_size: 10,
+            num_batches_per_sub_bundle: 2,
             proxies: 0,
-            load: 10,
+            load: 1,
             duration: 60,
         }
     }
@@ -104,7 +107,13 @@ impl ProtocolCommands for TargetProtocol {
             metrics_server_address: format!("{primary_ip}:{DEFAULT_METRICS_SERVER_PORT}")
                 .parse()
                 .unwrap(),
-            prover_parameters: parameters.target_configs.prover_parameters.clone(),
+            prover_parameters: ProverParameters::new(
+                parameters.target_configs.log_state_size,
+                parameters.target_configs.batch_size,
+                parameters.target_configs.num_batches_per_sub_bundle,
+                parameters.target_configs.branching_factor,
+                parameters.target_configs.num_compression_levels,
+            ),
         };
 
         // Command to upload the config of the db and the stress client.
