@@ -264,9 +264,7 @@
         "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -330,9 +328,7 @@
         "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -599,7 +595,7 @@
           "refId": "D"
         }
       ],
-      "title": "Primary Latencie",
+      "title": "Primary Latencies",
       "type": "timeseries"
     },
     {
@@ -950,6 +946,32 @@
           "range": true,
           "refId": "B",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Fixed-UID-testbed"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(provers_latency_s_count{prover=\"basic_prover\", job!=\"instance-node-0\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Fixed-UID-testbed"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(provers_latency_s_count{prover=\"compress_prover\", job!=\"instance-node-0\"}[$__rate_interval]))",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Proxies TPS",
@@ -957,7 +979,7 @@
     }
   ],
   "preload": false,
-  "refresh": "5s",
+  "refresh": "",
   "schemaVersion": 41,
   "tags": [],
   "templating": {
@@ -971,5 +993,5 @@
   "timezone": "browser",
   "title": "Minnow",
   "uid": "f3494ec8-795a-470e-83e1-c1ca5b63e118",
-  "version": 17
+  "version": 4
 }
