@@ -7,22 +7,22 @@ use std::collections::HashMap;
 // We will use the two_step_circuit.rs's base circuit.
 
 fn find_configs() -> Vec<(usize, (usize, usize, BaseCircuit))> {
-    let log_state_sizes = 10;
-    let step = 100;
+    let log_state_sizes = 20;
     let mut configs = HashMap::new();
-    for num_checkpoint_updates in (100..=1000).step_by(step) {
+    for num_checkpoint_updates in [100, 200, 500, 1150, 2450] {
         let circuit = BaseCircuit::new(log_state_sizes, 1, num_checkpoint_updates);
         // Insert the config if it is not already in the map.
         if !configs.contains_key(&circuit.circuit_info.degree_bits) {
+            println!("Added config: {:?}", circuit.circuit_info.degree_bits);
             configs.insert(
                 circuit.circuit_info.degree_bits,
                 (log_state_sizes, num_checkpoint_updates, circuit),
             );
         }
     }
-    // Ensure that there is at least one config for each degree bit from 12 to 15.
-    // TODO: Expand range
-    for degree_bit in 12..=15 {
+    println!("\n");
+
+    for degree_bit in 13..=17 {
         assert!(configs.contains_key(&degree_bit));
     }
 
@@ -43,6 +43,34 @@ fn bench_prover(c: &mut Criterion) {
         let all_checkpoint_updates = generate_sample_updates(1, num_checkpoint_updates);
         let pw = circuit
             .apply_bundle_and_compute_witness(&all_checkpoint_updates, &mut zk_service_state);
+
+        // Generate a proof once and reuse it for both size calculation and verification
+        let proof = circuit
+            .circuit_data
+            .prove(pw.clone())
+            .expect("Failed to generate proof");
+
+        // Calculate and display proof size
+        let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
+        let proof_size = proof_bytes.len();
+        println!(
+            "Proof size: {} bytes ({:.2} KB)",
+            proof_size,
+            proof_size as f64 / 1024.0
+        );
+
+        let compressed_proof = circuit
+            .circuit_data
+            .compress(proof)
+            .expect("Failed to compress proof");
+        let compressed_proof_bytes =
+            bincode::serialize(&compressed_proof).expect("Failed to serialize compressed proof");
+        let compressed_proof_size = compressed_proof_bytes.len();
+        println!(
+            "Compressed proof size: {} bytes ({:.2} KB)",
+            compressed_proof_size,
+            compressed_proof_size as f64 / 1024.0
+        );
 
         c.bench_function(format!("circuit_{}", degree).as_str(), |b| {
             b.iter(|| {

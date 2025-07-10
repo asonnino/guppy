@@ -78,6 +78,7 @@ fn main() {
     for c in 0..num_checkpoints {
         let checkpoint_updates = all_updates[c * num_batches..(c + 1) * num_batches].to_vec();
         let new_head = hash_commitment(&checkpoint_updates, batch_size, &prev_head).unwrap();
+        println!("New head: {:?}", new_head);
         let pw = circuit.apply_bundle_and_compute_witness(
             c,
             &checkpoint_updates,
@@ -95,6 +96,20 @@ fn main() {
             c + 1,
             end.duration_since(start)
         );
+
+        let compressed_proof = circuit
+            .circuit_data
+            .compress(proof.clone())
+            .expect("Failed to compress proof");
+        let compressed_proof_bytes =
+            bincode::serialize(&compressed_proof).expect("Failed to serialize compressed proof");
+        let compressed_proof_size = compressed_proof_bytes.len();
+        println!(
+            "Compressed proof size: {} bytes ({:.2} KB)",
+            compressed_proof_size,
+            compressed_proof_size as f64 / 1024.0
+        );
+
         check_cyclic_proof_verifier_data(&proof, verifier_data, &common_data).unwrap();
         circuit.circuit_data.verify(proof.clone()).unwrap();
 

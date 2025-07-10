@@ -3,8 +3,6 @@ members = ["minnow-mt-plonky2", "minnow-lib", "minnow-core", "orchestrator"]
 resolver = "2"
 
 [workspace.dependencies]
-rkyv = "0.8.9"
-anyhow = "1.0.93"
 tracing = "0.1.40"
 thiserror = "2.0.3"
 clap = { version = "4.5.24", features = ["derive", "env"] }
@@ -15,5 +13,4 @@ log = "0.4.22"
 hashbrown = "0.14.3"
 # Workspace dependencies below
 minnow-lib = { path = "minnow-lib" }
-minnow-mt-plonky2 = { path = "minnow-mt-plonky2" }
 serde = { version = "1.0.219", features = ["derive"] }
