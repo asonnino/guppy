@@ -141,6 +141,7 @@ pub struct MinnowBCircuits {
 
 impl MinnowBCircuits {
     pub fn new_with_config(config: &MinnowBConfig) -> Self {
+        println!("Building circuits with config: {:?}", config);
         let log_state_size = config.log_state_size;
         let batch_size = config.batch_size;
         let num_batches_per_sub_bundle = config.num_batches_per_sub_bundle;
@@ -537,7 +538,7 @@ mod tests {
     use tracing::Level;
 
     use super::*;
-    use crate::MinnowMTServiceState;
+    use crate::{MinnowMTServiceState, DEFAULT_BATCH_SIZE, DEFAULT_LOG_STATE_SIZE};
 
     #[test]
     fn test_compressed_circuit() {
@@ -601,50 +602,64 @@ mod tests {
     }
 
     #[test]
-    fn test_a_possibly_optimal_config() {
-        let log_state_size = 30;
-        let batch_size = 25;
-        let num_batches_per_sub_bundle = 9;
+    fn test_configs() {
+        let log_state_size = DEFAULT_LOG_STATE_SIZE;
+        let batch_size = DEFAULT_BATCH_SIZE;
+        let num_batches_per_sub_bundle = 4;
         let branching_factor = 3;
-        let num_compression_levels = 1;
-        // sub_bundle_size = batch_size * num_batches_per_sub_bundle = 225
-        // bundle_size = sub_bundle_size * branching_factor = 675
 
-        let minnow_b_circuits = MinnowBCircuits::new(
-            log_state_size,
-            batch_size,
-            num_batches_per_sub_bundle,
-            branching_factor,
-            num_compression_levels,
-        );
-        println!(
-            "Base circuit info: {:?}",
-            minnow_b_circuits.base_circuit.circuit_info
-        );
-        println!(
-            "Compressed circuit info: {:?}",
-            minnow_b_circuits.compressed_circuits[0].circuit_info
-        );
-        println!(
-            "Sequential circuit info: {:?}",
-            minnow_b_circuits.sequential_circuit.circuit_info
-        );
-
-        assert_eq!(minnow_b_circuits.base_circuit.circuit_info.degree_bits, 14);
-        assert_eq!(minnow_b_circuits.compressed_circuits.len(), 1);
-        assert_eq!(
-            minnow_b_circuits.compressed_circuits[0]
-                .circuit_info
-                .degree_bits,
-            14
-        );
-        assert_eq!(
-            minnow_b_circuits
-                .sequential_circuit
-                .circuit_info
-                .degree_bits,
-            14
-        );
+        for num_compression_levels in 1..=3 {
+            println!(
+                "Testing config with num_compression_levels = {}",
+                num_compression_levels
+            );
+            let sub_bundle_size = batch_size * num_batches_per_sub_bundle;
+            let bundle_size = sub_bundle_size
+                * (branching_factor as u32).pow(num_compression_levels as u32) as usize;
+            println!("Sub bundle size: {}", sub_bundle_size);
+            println!("Bundle size: {}", bundle_size);
+            let minnow_b_circuits = MinnowBCircuits::new(
+                log_state_size,
+                batch_size,
+                num_batches_per_sub_bundle,
+                branching_factor,
+                num_compression_levels,
+            );
+            println!(
+                "Base circuit info: {:?}",
+                minnow_b_circuits.base_circuit.circuit_info
+            );
+            for i in 0..minnow_b_circuits.compressed_circuits.len() {
+                println!(
+                    "Compressed circuit info: {:?}",
+                    minnow_b_circuits.compressed_circuits[i].circuit_info
+                );
+            }
+            println!(
+                "Sequential circuit info: {:?}",
+                minnow_b_circuits.sequential_circuit.circuit_info
+            );
+            assert_eq!(minnow_b_circuits.base_circuit.circuit_info.degree_bits, 14);
+            assert_eq!(
+                minnow_b_circuits.compressed_circuits.len(),
+                num_compression_levels as usize
+            );
+            for i in 0..minnow_b_circuits.compressed_circuits.len() {
+                assert_eq!(
+                    minnow_b_circuits.compressed_circuits[i]
+                        .circuit_info
+                        .degree_bits,
+                    14
+                );
+            }
+            assert_eq!(
+                minnow_b_circuits
+                    .sequential_circuit
+                    .circuit_info
+                    .degree_bits,
+                14
+            );
+        }
     }
 
     #[test]

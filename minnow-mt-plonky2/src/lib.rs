@@ -23,6 +23,7 @@ use plonky2::with_context;
 
 use crate::merkle::MerkleLeaf;
 
+pub const DEFAULT_LOG_STATE_SIZE: usize = 30;
 pub const DEFAULT_BATCH_SIZE: usize = 50;
 
 #[derive(Debug)]
