@@ -1,5 +1,5 @@
-- proxies: 5
-  load: 1
+- proxies: 4
+  load: 0.8
   duration: 600
   log_state_size: 30
   batch_size: 50
@@ -7,8 +7,8 @@
   branching_factor: 3
   num_compression_levels: 1
 
-- proxies: 5
-  load: 1
+- proxies: 13
+  load: 0.8
   duration: 600
   log_state_size: 30
   batch_size: 50
@@ -16,20 +16,11 @@
   branching_factor: 3
   num_compression_levels: 2
 
-- proxies: 5
-  load: 1
+- proxies: 40
+  load: 0.8
   duration: 600
   log_state_size: 30
   batch_size: 50
   num_batches_per_sub_bundle: 4
   branching_factor: 3
   num_compression_levels: 3
-
-- proxies: 2
-  load: 1
-  duration: 600
-  log_state_size: 10
-  batch_size: 10
-  num_batches_per_sub_bundle: 2
-  branching_factor: 2
-  num_compression_levels: 2
