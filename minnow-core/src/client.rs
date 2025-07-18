@@ -60,7 +60,7 @@ impl Client {
 
         // Send updates at a fixed interval
         let updates_per_interval = self.load;
-        let mut interval = time::interval(Duration::from_secs(1));
+        let mut interval = time::interval(Duration::from_secs(2));
 
         tracing::info!("Client starting to send state updates");
         loop {
