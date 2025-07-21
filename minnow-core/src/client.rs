@@ -18,7 +18,8 @@ use crate::{
 pub struct Client {
     config: NodeConfig,
     metrics: Option<Arc<Metrics>>,
-    load: usize,
+    /// The interval (in ms) at which the client sends state updates.
+    submission_interval: usize,
     duration: Duration,
     tx_outgoing: mpsc::Sender<StateUpdateMessage>,
     network_client: NetworkClient<(), StateUpdateMessage>,
@@ -27,7 +28,7 @@ pub struct Client {
 impl Client {
     pub fn new(
         config: NodeConfig,
-        load: usize,
+        submission_interval: usize,
         duration: Duration,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
@@ -38,7 +39,7 @@ impl Client {
 
         Self {
             config,
-            load,
+            submission_interval,
             duration,
             tx_outgoing,
             network_client,
@@ -54,13 +55,13 @@ impl Client {
 
         // Prepare the state updates
         let prover_parameters = &self.config.prover_parameters;
-        let total_updates = self.load * self.duration.as_secs() as usize;
+        let total_updates = self.duration.as_secs() as usize;
         tracing::info!("Generating {total_updates} batches of state updates");
         let mut state_updates = prover_parameters.generate_multiple_sample_bundles(total_updates);
 
         // Send updates at a fixed interval
-        let updates_per_interval = self.load;
-        let mut interval = time::interval(Duration::from_secs(2));
+        let updates_per_interval = 1;
+        let mut interval = time::interval(Duration::from_millis(self.submission_interval as u64));
 
         tracing::info!("Client starting to send state updates");
         loop {

@@ -8,5 +8,5 @@ regions:
 specs: m6a.8xlarge
 repository:
   url: https://<GITHUB_TOKEN>@github.com/mystenlabs/minnow.git
-  commit: semaphore
+  commit: main
 target_configs_path: "./orchestrator/assets/target_configs.yml"

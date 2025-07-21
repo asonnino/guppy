@@ -1,5 +1,5 @@
 - proxies: 4
-  load: 0.8
+  load: 800
   duration: 600
   log_state_size: 30
   batch_size: 50
@@ -8,7 +8,7 @@
   num_compression_levels: 1
 
 - proxies: 13
-  load: 0.8
+  load: 800
   duration: 600
   log_state_size: 30
   batch_size: 50
@@ -17,7 +17,7 @@
   num_compression_levels: 2
 
 - proxies: 40
-  load: 0.8
+  load: 800
   duration: 600
   log_state_size: 30
   batch_size: 50
