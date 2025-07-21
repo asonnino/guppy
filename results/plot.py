@@ -18,9 +18,21 @@ def read_column_values(csv_path):
 # === Latency vs Throughput plot ===
 
 
-def read_throughput_values(csv_path):
+def read_throughput_values(csv_path, folder_name):
+    parameters = folder_name.split("-")
+    batch_size = parameters[4]
+    num_batches_per_sub_bundle = parameters[5]
+    branching_factor = parameters[6]
+    num_compression_levels = parameters[7]
+
+    multiplier = (
+        int(batch_size)
+        * int(num_batches_per_sub_bundle)
+        * int(branching_factor) ** int(num_compression_levels)
+    )
+
     _, rows = read_column_values(csv_path)
-    return [float(row[1]) for row in rows]
+    return [float(row[1]) * multiplier for row in rows]
 
 
 def read_latency_values(csv_path):
@@ -42,7 +54,7 @@ def process_latency_throughput(folders):
             print(f"Missing TPS/latency file in {folder}")
             continue
         try:
-            tps = read_throughput_values(tps_path)
+            tps = read_throughput_values(tps_path, folder)
             p50, p90 = read_latency_values(latency_path)
             results.append((folder, np.median(tps), np.median(p50), np.median(p90)))
         except Exception as e:
@@ -78,7 +90,7 @@ def plot_latency_vs_throughput(data, output_prefix="latency_vs_throughput"):
         )
 
     plt.title("Latency (P50 + P90) vs Throughput")
-    plt.xlabel("Throughput (TPS)")
+    plt.xlabel("Throughput (updates/sec)")
     plt.ylabel("Latency (ms)")
     plt.ylim(bottom=0)
     plt.xlim(left=0)
