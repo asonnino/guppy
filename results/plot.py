@@ -44,7 +44,7 @@ def process_latency_throughput(folders):
         try:
             tps = read_throughput_values(tps_path)
             p50, p90 = read_latency_values(latency_path)
-            results.append((folder, np.mean(tps), np.mean(p50), np.mean(p90)))
+            results.append((folder, np.median(tps), np.median(p50), np.median(p90)))
         except Exception as e:
             print(f"Error in {folder}: {e}")
     return results
@@ -81,6 +81,7 @@ def plot_latency_vs_throughput(data, output_prefix="latency_vs_throughput"):
     plt.xlabel("Throughput (TPS)")
     plt.ylabel("Latency (ms)")
     plt.ylim(bottom=0)
+    plt.xlim(left=0)
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(f"{output_prefix}.pdf")
@@ -135,7 +136,7 @@ def process_prover_latency(folder):
             print(f"Error processing {path}: {e}")
 
     summary = [
-        (prover, np.mean(values)) for prover, values in p50_data.items() if values
+        (prover, np.median(values)) for prover, values in p50_data.items() if values
     ]
     print(f"Summary for folder {folder}: {summary}")
     return summary
@@ -169,7 +170,7 @@ def plot_prover_latency_breakdown(summary, folder_name):
 # === Main driver ===
 
 if __name__ == "__main__":
-    folders = ["5-1-600-30-25-9-3-1", "5-1-600-30-25-9-3-2", "5-1-600-30-25-9-3-3"]
+    folders = ["4-1-180-30-50-4-3-1", "13-1-180-30-50-4-3-2", "13-1-180-30-50-4-3-3"]
 
     # Plot 1: Latency vs Throughput (combined)
     results = process_latency_throughput(folders)

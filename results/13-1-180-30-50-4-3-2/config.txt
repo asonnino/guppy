@@ -1,0 +1,8 @@
+- proxies: 13
+  load: 800
+  duration: 180
+  log_state_size: 30
+  batch_size: 50
+  num_batches_per_sub_bundle: 4
+  branching_factor: 3
+  num_compression_levels: 2
