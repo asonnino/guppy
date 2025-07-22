@@ -187,11 +187,14 @@ impl MinnowBCircuits {
             }
         }
 
-        let root_circuit = compressed_circuits.last().unwrap();
+        let root_circuit_data = if num_compression_levels != 0 {
+            &compressed_circuits.last().unwrap().circuit_data
+        } else {
+            &base_circuit.circuit_data
+        };
 
         let initial_root = get_initial_root(log_state_size + 1);
-        let sequential_circuit =
-            CyclicSequentialCircuit::new(&initial_root, &root_circuit.circuit_data);
+        let sequential_circuit = CyclicSequentialCircuit::new(&initial_root, &root_circuit_data);
         Self {
             base_circuit,
             compressed_circuits,
@@ -608,7 +611,7 @@ mod tests {
         let num_batches_per_sub_bundle = 4;
         let branching_factor = 3;
 
-        for num_compression_levels in 1..=3 {
+        for num_compression_levels in 0..=3 {
             println!(
                 "Testing config with num_compression_levels = {}",
                 num_compression_levels
@@ -718,6 +721,28 @@ mod tests {
         let provers = circuits.build_provers();
 
         let bundle = config.generate_single_sample_bundle();
+        let mut orchestrator = Orchestrator::new(provers, true);
+        let proof = orchestrator.compute_proof(&bundle);
+        orchestrator.verify_cyclic_proof(proof);
+    }
+
+    #[test]
+    fn test_e2e_no_compression() {
+        let log_state_size = DEFAULT_LOG_STATE_SIZE;
+        let batch_size = DEFAULT_BATCH_SIZE;
+        let num_batches_per_sub_bundle = 4;
+        let branching_factor = 3;
+        let num_compression_levels = 0;
+
+        let minnow_b_circuits = MinnowBCircuits::new(
+            log_state_size,
+            batch_size,
+            num_batches_per_sub_bundle,
+            branching_factor,
+            num_compression_levels,
+        );
+        let bundle = minnow_b_circuits.config.generate_single_sample_bundle();
+        let provers = minnow_b_circuits.build_provers();
         let mut orchestrator = Orchestrator::new(provers, true);
         let proof = orchestrator.compute_proof(&bundle);
         orchestrator.verify_cyclic_proof(proof);
