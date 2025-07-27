@@ -13,7 +13,8 @@ use crate::{
     benchmark::BenchmarkParameters,
     client::Instance,
     collector::MetricsCollector,
-    display, ensure,
+    display,
+    ensure,
     error::{TestbedError, TestbedResult},
     logs::LogsAnalyzer,
     monitor::Monitor,
@@ -121,9 +122,10 @@ impl<P> Orchestrator<P> {
 
         // Select the instances to host the nodes.
         let mut nodes_instances = Vec::new();
-        for instances in instances_by_regions.into_values().take(1 + proxies) {
+        for instances in instances_by_regions.into_values() {
             nodes_instances.extend(instances.into_iter().cloned());
         }
+        nodes_instances.truncate(1 + proxies);
 
         Ok((nodes_instances, monitoring_instance))
     }

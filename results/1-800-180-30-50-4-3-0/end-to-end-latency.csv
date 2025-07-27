@@ -1,0 +1,7 @@
+"Time","histogram_quantile(0.5, sum by(le) (rate(total_latency_s_bucket[1m0s])))","histogram_quantile(0.9, sum by(le) (rate(total_latency_s_bucket[1m0s])))"
+2025-07-27 16:18:00,1.38,1.48
+2025-07-27 16:18:15,1.38,1.48
+2025-07-27 16:18:30,1.38,1.48
+2025-07-27 16:18:45,1.38,1.48
+2025-07-27 16:19:00,1.38,1.48
+2025-07-27 16:19:15,1.38,1.48

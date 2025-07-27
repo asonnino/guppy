@@ -182,7 +182,12 @@ def plot_prover_latency_breakdown(summary, folder_name):
 # === Main driver ===
 
 if __name__ == "__main__":
-    folders = ["4-1-180-30-50-4-3-1", "13-1-180-30-50-4-3-2", "13-1-180-30-50-4-3-3"]
+    folders = [
+        "1-800-180-30-50-4-3-0",
+        "4-800-180-30-50-4-3-1",
+        "13-800-180-30-50-4-3-2",
+        "40-800-180-30-50-4-3-3",
+    ]
 
     # Plot 1: Latency vs Throughput (combined)
     results = process_latency_throughput(folders)

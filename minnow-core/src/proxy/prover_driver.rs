@@ -72,12 +72,20 @@ impl ProverDriver {
                 let elapsed = start.elapsed();
                 self.metrics.observe_basic_prover_latency(elapsed);
 
-                ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
-                    submission_timestamp,
-                    index,
-                    compression_level: 0,
-                    proofs: vec![proof],
-                })
+                if self.max_compression_level == 0 {
+                    ProtocolMessage::FinalCompressionProof {
+                        submission_timestamp,
+                        index,
+                        proof,
+                    }
+                } else {
+                    ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
+                        submission_timestamp,
+                        index,
+                        compression_level: 0,
+                        proofs: vec![proof],
+                    })
+                }
             }
             ProtocolMessage::PartialCompressionProof(PartialCompressionProof {
                 submission_timestamp,
