@@ -129,11 +129,9 @@ def process_prover_latency(folder):
             print(f"Missing file: {path}")
             continue
 
-        print(f"Processing file: {path}")
         try:
             headers, rows = read_column_values(path)
             prover_info = extract_p50_prover_names_and_indices(headers)
-            print(f"Found provers in {filename}: {[p[0] for p in prover_info]}")
 
             for prover_name, col_idx in prover_info:
                 try:
@@ -150,7 +148,6 @@ def process_prover_latency(folder):
     summary = [
         (prover, np.median(values)) for prover, values in p50_data.items() if values
     ]
-    print(f"Summary for folder {folder}: {summary}")
     return summary
 
 
@@ -160,14 +157,14 @@ def plot_prover_latency_breakdown(summary, folder_name):
         return
 
     summary.sort()
-    provers = [s[0] for s in summary]
+    provers = [s[0].replace("_", " ").capitalize() for s in summary]
     p50s = [s[1] for s in summary]
 
     x = np.arange(len(provers))
     plt.figure(figsize=(10, 6))
     plt.bar(x, p50s, color="orange", edgecolor="black")
-    plt.xticks(x, provers, rotation=45, ha="right")
-    plt.title(f"Latency Breakdown by Prover\n{folder_name}")
+    plt.grid(axis="y", linestyle="--", alpha=0.7)
+    plt.xticks(x, provers)
     plt.xlabel("Prover")
     plt.ylabel("Average P50 Latency (ms)")
     plt.ylim(bottom=0)
