@@ -487,7 +487,7 @@ impl CompressionProver {
 }
 
 pub struct CyclicProver {
-    cyclic_circuit: CyclicSequentialCircuit,
+    pub cyclic_circuit: CyclicSequentialCircuit,
     prev_proof: Proof,
     first_proof: bool,
 }

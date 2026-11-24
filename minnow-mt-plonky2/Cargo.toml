@@ -30,3 +30,7 @@ harness = false
 
 [features]
 comprehensive_tests = []
+
+[[bench]]
+name = "verifying"
+harness = false
