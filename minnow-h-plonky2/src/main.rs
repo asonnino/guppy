@@ -1,152 +1,113 @@
+//! Minnow-H microbenchmark: for each (tracked streams m, updates per checkpoint n),
+//! build the cyclic circuit, prove a chain of checkpoints, and report the median
+//! proving time per checkpoint, the compressed proof size, and the client's
+//! verification time. Prints one CSV row per configuration.
+//!
+//! Run: cargo run --release -p minnow-h-plonky2 -- --tracked 1,4,16,64 --updates 100,1000,2100
+
 use clap::Parser;
-use hashbrown::HashMap;
-use log::LevelFilter;
-use log::info;
-
-use minnow_h_plonky2::circuit::{build_circuit, AllTargets};
-use minnow_h_plonky2::MinnowHServiceState;
-use minnow_lib::utils::{generate_sample_updates, set_log_level};
-use minnow_lib::utils::{Digest, C, D, F};
-use minnow_lib::{hash_commitment, CheckpointUpdates, StreamID};
-use plonky2::field::types::Field;
-use plonky2::iop::witness::PartialWitness;
-use plonky2::iop::witness::WitnessWrite;
-use plonky2::plonk::circuit_data::VerifierOnlyCircuitData;
-use plonky2::plonk::proof::ProofWithPublicInputs;
-use plonky2::recursion::cyclic_recursion::check_cyclic_proof_verifier_data;
-use plonky2::recursion::dummy_circuit::cyclic_base_proof;
-
-use std::time::Instant;
+use log::{info, LevelFilter};
+use minnow_h_plonky2::circuit::MinnowHCircuit;
+use minnow_h_plonky2::{tracked_stream_ids, MinnowHServiceState};
+use minnow_lib::utils::{generate_random_batches, set_log_level, Digest};
+use minnow_lib::{hash_commitment, Batch, StreamID, StreamPoint, STREAM_VAL_LEN};
+use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = 5)]
-    state_size: usize,
+    /// Numbers of tracked streams (m), comma separated.
+    #[arg(long, value_delimiter = ',', default_value = "1,4,16,64")]
+    tracked: Vec<usize>,
 
-    #[arg(short, long, default_value_t = 1000)]
-    checkpoint_updates: usize,
+    /// Updates per checkpoint (n), comma separated; multiples of the batch size.
+    #[arg(long, value_delimiter = ',', default_value = "100,1000,2100")]
+    updates: Vec<usize>,
 
-    /// Logarithmic estimate of the number of gates
-    #[arg(short = 'g', long)]
-    degree_bits: Option<usize>,
+    #[arg(long, default_value_t = 50)]
+    batch_size: usize,
 
-    /// Build the circuit only, don't prove
-    #[arg(short, long, default_value_t = false)]
-    build_only: bool,
+    /// Recursive proofs timed per configuration (after the base-case proof).
+    #[arg(long, default_value_t = 5)]
+    runs: usize,
 
     #[arg(short, long, default_value_t = false)]
     debug: bool,
 }
 
-fn set_witness(
-    checkpoint_number: usize,
-    checkpoint_updates: &CheckpointUpdates,
-    zk_service_state: &MinnowHServiceState,
-    all_targets: &AllTargets,
-    prev_proof: &ProofWithPublicInputs<F, C, D>,
-    base_case: bool,
-    verifier_data: &VerifierOnlyCircuitData<C, D>,
-) -> PartialWitness<F> {
-    info!(
-        "apply_checkpoint_updates_and_set_witness: start ({})",
-        checkpoint_number
-    );
-    let mut pw = PartialWitness::new();
-    pw.set_bool_target(all_targets.condition, !base_case)
-        .unwrap();
-    pw.set_proof_with_pis_target(&all_targets.inner_cyclic_proof_with_pis, &prev_proof)
-        .unwrap();
-    pw.set_verifier_data_target(&all_targets.verifier_data_target, verifier_data)
-        .unwrap();
-
-    assert_eq!(
-        checkpoint_updates.len(),
-        all_targets.checkpoint_update_targets.len()
-    );
-    for (update, target) in checkpoint_updates
-        .iter()
-        .zip(all_targets.checkpoint_update_targets.iter())
-    {
-        target.set_proof_targets(&mut pw, &update.encode());
+/// Random updates, with every tracked stream updated once.
+fn checkpoint(num_batches: usize, batch_size: usize, tracked: &[StreamID], c: usize) -> Vec<Batch> {
+    let mut batches = generate_random_batches(num_batches, batch_size);
+    let n = num_batches * batch_size;
+    for (k, id) in tracked.iter().enumerate() {
+        let pos = (k * n) / tracked.len().max(1);
+        batches[pos / batch_size][pos % batch_size] =
+            StreamPoint::new(*id, [(c + k) as u8; STREAM_VAL_LEN]);
     }
+    batches
+}
 
-    assert_eq!(zk_service_state.len(), all_targets.in_state_targets.len());
-    for (stream_point, target) in zk_service_state
-        .iter()
-        .zip(all_targets.in_state_targets.iter())
-    {
-        target.set_proof_targets(&mut pw, &stream_point.encode());
-    }
-
-    pw
+fn median(mut v: Vec<Duration>) -> Duration {
+    v.sort();
+    v[v.len() / 2]
 }
 
 fn main() {
-    // Parse the command line arguments.
     let args = Args::parse();
+    set_log_level(if args.debug { LevelFilter::Debug } else { LevelFilter::Info });
     info!("{:?}", args);
-    if args.debug {
-        set_log_level(LevelFilter::Debug);
-    } else {
-        set_log_level(LevelFilter::Info);
-    }
 
-    let num_checkpoint_updates = args.checkpoint_updates;
-    let degree_bits = args.degree_bits;
-    let num_tracking_streams = args.state_size;
-    let tracking_streams: Vec<StreamID> =
-        (0..num_tracking_streams).map(|i| i as StreamID).collect();
-    let (cyclic_circuit_data, all_targets) =
-        build_circuit(num_checkpoint_updates, &tracking_streams, degree_bits);
-    let verifier_data = &cyclic_circuit_data.verifier_only;
-    let common_data = &cyclic_circuit_data.common;
+    println!("csv,tracked,updates,batch_size,gates,degree_bits,build_s,prove_ms,proof_bytes_compressed,verify_compressed_ms");
+    for &n in &args.updates {
+        assert_eq!(n % args.batch_size, 0, "updates must be a multiple of the batch size");
+        let num_batches = n / args.batch_size;
+        for &m in &args.tracked {
+            let tracked = tracked_stream_ids(m);
+            let start = Instant::now();
+            let circuit = MinnowHCircuit::new(num_batches, args.batch_size, &tracked);
+            let build = start.elapsed();
+            let data = &circuit.circuit_data;
 
-    let num_checkpoints = 10;
-    let all_checkpoint_updates =
-        generate_sample_updates(num_checkpoints, num_checkpoint_updates);
+            let mut state = MinnowHServiceState::new(&tracked);
+            let mut head = Digest::ZERO;
+            let mut proof = circuit.base_proof();
+            let mut prove_times = vec![];
+            for c in 0..=args.runs {
+                let batches = checkpoint(num_batches, args.batch_size, &tracked, c);
+                let start = Instant::now();
+                proof = circuit.prove(&batches, &state, &proof, c == 0);
+                let elapsed = start.elapsed();
+                if c > 0 {
+                    prove_times.push(elapsed); // the base case skips the inner verifier
+                }
+                head = hash_commitment(&batches, args.batch_size, &head).unwrap();
+                state.apply_checkpoint_updates(&batches);
+                assert_eq!(proof.public_inputs[0..4], head.elements);
+                assert_eq!(proof.public_inputs[4..8], state.commit().elements);
+            }
 
-    let mut state = MinnowHServiceState::new(&tracking_streams);
-    let mut prev_head = Digest::ZERO;
-    let mut proof = cyclic_base_proof(&common_data, verifier_data, HashMap::<usize, F>::new());
-    for c in 0..num_checkpoints {
-        let checkpoint_updates = &all_checkpoint_updates[c];
-        let pw = set_witness(
-            c,
-            &checkpoint_updates,
-            &state,
-            &all_targets,
-            &proof,
-            c == 0,
-            &verifier_data,
-        );
+            let compressed = data.compress(proof.clone()).unwrap();
+            let size = bincode::serialize(&compressed).unwrap().len();
+            let mut verify_times = vec![];
+            for _ in 0..20 {
+                let p = compressed.clone();
+                let start = Instant::now();
+                data.verify_compressed(p).unwrap();
+                verify_times.push(start.elapsed());
+            }
 
-        let start = Instant::now();
-        proof = cyclic_circuit_data.prove(pw).unwrap();
-        let end = Instant::now();
-        info!(
-            "{}th recursive proof generation time: {:?}",
-            c + 1,
-            end.duration_since(start)
-        );
-        check_cyclic_proof_verifier_data(&proof, verifier_data, &cyclic_circuit_data.common)
-            .unwrap();
-        cyclic_circuit_data.verify(proof.clone()).unwrap();
-
-        // Tests
-        let new_head = hash_commitment(&checkpoint_updates, &prev_head);
-        assert_eq!(new_head.elements, proof.public_inputs[0..4]);
-
-        state.apply_checkpoint_updates(&checkpoint_updates);
-        assert_eq!(state.commit().elements, proof.public_inputs[4..8]);
-
-        assert_eq!(
-            F::from_canonical_u32((c + 1) as u32),
-            proof.public_inputs[8]
-        );
-
-        info!("{}th proof verified!", c + 1);
-
-        prev_head = new_head;
+            println!(
+                "csv,{},{},{},{},{},{:.1},{:.1},{},{:.2}",
+                m,
+                n,
+                args.batch_size,
+                circuit.num_gates,
+                data.common.degree_bits(),
+                build.as_secs_f64(),
+                median(prove_times).as_secs_f64() * 1e3,
+                size,
+                median(verify_times).as_secs_f64() * 1e3,
+            );
+        }
     }
 }

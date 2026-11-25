@@ -9,3 +9,4 @@ plonky2.workspace = true
 minnow-lib.workspace = true
 log.workspace = true
 hashbrown.workspace = true
+bincode = "1.3.3"
