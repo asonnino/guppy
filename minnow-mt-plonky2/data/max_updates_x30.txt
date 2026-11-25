@@ -1,6 +1,6 @@
 cargo run --bin determine_max_updates --release 30
     Finished `release` profile [optimized] target(s) in 0.06s
-     Running `/Users/saikrishnadeepakmaram/Desktop/minnow/target/release/determine_max_updates 30`
+     Running `target/release/determine_max_updates 30`
 Finding change point starting from 1 for 2**13 gates
 Degree: 1 14
 Degree: 2 14

@@ -1,92 +1,53 @@
-# SP1 Project Template
+# Minnow
 
-This is a template for creating an end-to-end [SP1](https://github.com/succinctlabs/sp1) project
-that can generate a proof of any RISC-V program.
+Light clients with completeness on chains whose validators commit only to the
+updates of each checkpoint. Validators extend a batched hash chain over each
+checkpoint's stream updates; an untrusted ZK service maintains a Merkle tree over the
+full state and proves every update with recursive Plonky2 proofs, so a client can
+check the state of any stream at any checkpoint from one proof, one Merkle path, and
+one signed checkpoint header.
 
-## Requirements
+## Crates
 
-- [Rust](https://rustup.rs/)
-- [SP1](https://docs.succinct.xyz/getting-started/install.html)
+| Crate | Contents |
+|---|---|
+| `minnow-lib` | Shared types and the validator-side commitment (batched hash chain). |
+| `minnow-mt-plonky2` | Merkle-tree circuits: Minnow-A (one recursive circuit per bundle) and the base, aggregation, and cyclic circuits of Minnow-B; circuit-size tools and benchmarks. |
+| `minnow-h-plonky2` | Minnow-H: the ZK service tracks a fixed set of streams and commits to them with one hash over the list. |
+| `minnow-core` | The distributed Minnow-B prover (primary, workers, clients). |
+| `orchestrator` | Deploys and benchmarks `minnow-core` on cloud machines; see [`orchestrator/readme.md`](orchestrator/readme.md). |
+| `sp1` | An exploratory SP1 (zkVM) port, not used in the measurements below. |
 
-## Running the Project
+## Reproducing the measurements
 
-There are four main ways to run this project: build a program, execute a program, generate a core proof, and
-generate an EVM-compatible proof.
-
-### Build the Program
-
-To build the program, run the following command:
-
-```sh
-cd program
-cargo prove build
-```
-
-### Execute the Program
-
-To run the program without generating a proof:
+Requires a recent Rust toolchain (see `rust-toolchain`). All commands run from the
+repository root.
 
 ```sh
-cd script
-cargo run --release -- --execute
+# Validator-side commitment time by batch size and number of updates
+cargo bench -p minnow-lib --bench hash_commitment
+
+# Plonky2 proving time by circuit degree
+cargo bench -p minnow-mt-plonky2 --bench proving
+
+# Client verification of Minnow-A and Minnow-B proofs (compressed and not)
+cargo bench -p minnow-mt-plonky2 --bench verifying
+
+# Circuit sizes (gates and degree)
+cargo run --release -p minnow-mt-plonky2 --bin circuit_sizes -- base             # base circuit by updates
+cargo run --release -p minnow-mt-plonky2 --bin circuit_sizes -- base_batch_sizes # base circuit by batch size
+cargo run --release -p minnow-mt-plonky2 --bin circuit_sizes -- one_step         # Minnow-A circuit
+cargo run --release -p minnow-mt-plonky2 --bin circuit_sizes -- compressed       # aggregation circuit
+
+# Maximum updates per Minnow-A proof at degrees 14-17, for 2^30 streams (also 10, 20)
+cargo run --release -p minnow-mt-plonky2 --bin determine_max_updates -- 30
+
+# Minnow-H: proving time, proof size, and verification time by tracked streams and updates
+cargo run --release -p minnow-h-plonky2 -- --tracked 1,4,16,64 --updates 100,1000,2100
+
+# Tests
+cargo test --release
 ```
 
-This will execute the program and display the output.
-
-### Generate a Core Proof
-
-To generate a core proof for your program:
-
-```sh
-cd script
-cargo run --release -- --prove
-```
-
-### Generate an EVM-Compatible Proof
-
-> [!WARNING]
-> You will need at least 128GB RAM to generate a Groth16 or PLONK proof.
-
-To generate a proof that is small enough to be verified on-chain and verifiable by the EVM:
-
-```sh
-cd script
-cargo run --release --bin evm -- --system groth16
-```
-
-this will generate a Groth16 proof. If you want to generate a PLONK proof, run the following command:
-
-```sh
-cargo run --release --bin evm -- --system plonk
-```
-
-These commands will also generate fixtures that can be used to test the verification of SP1 zkVM proofs
-inside Solidity.
-
-### Retrieve the Verification Key
-
-To retrieve your `programVKey` for your on-chain contract, run the following command:
-
-```sh
-cargo prove vkey --elf elf/riscv32im-succinct-zkvm-elf
-```
-
-## Using the Prover Network
-
-We highly recommend using the Succinct prover network for any non-trivial programs or benchmarking purposes. For more information, see the [setup guide](https://docs.succinct.xyz/generating-proofs/prover-network.html).
-
-To get started, copy the example environment file:
-
-```sh
-cp .env.example .env
-```
-
-Then, set the `SP1_PROVER` environment variable to `network` and set the `SP1_PRIVATE_KEY`
-environment variable to your whitelisted private key.
-
-For example, to generate an EVM-compatible proof using the prover network, run the following
-command:
-
-```sh
-SP1_PROVER=network SP1_PRIVATE_KEY=... cargo run --release --bin evm
-```
+End-to-end Minnow-B runs (latency and throughput on several machines) use the
+orchestrator; follow [`orchestrator/readme.md`](orchestrator/readme.md).

@@ -1,7 +1,7 @@
-   Compiling minnow-lib v0.1.0 (/Users/saikrishnadeepakmaram/Desktop/minnow/minnow-lib)
-   Compiling minnow-mt-plonky2 v0.1.0 (/Users/saikrishnadeepakmaram/Desktop/minnow/minnow-mt-plonky2)
+   Compiling minnow-lib v0.1.0 (minnow-lib)
+   Compiling minnow-mt-plonky2 v0.1.0 (minnow-mt-plonky2)
     Finished `release` profile [optimized] target(s) in 6.13s
-     Running `/Users/saikrishnadeepakmaram/Desktop/minnow/target/release/determine_max_updates 10`
+     Running `target/release/determine_max_updates 10`
 Finding change point starting from 1 for 2**13 gates
 Degree: 1 13
 Degree: 2 14
