@@ -38,7 +38,7 @@ The documentation of the `Settings` struct in `./src/settings.rs` provides detai
 
 ```yml
 repository:
-  - url: http://YOUR_ACCESS_TOKEN@github.com/asonino/-mysticeti.git
+  - url: http://YOUR_ACCESS_TOKEN@github.com/asonnino/minnow.git
   - commit: main
 ```
 
